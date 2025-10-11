@@ -1,0 +1,20 @@
+{
+	"$schema": "https://raw.githubusercontent.com/microsoft/vscode/master/extensions/typescript-basics/syntaxes/TypeScriptReact.tmLanguage.json",
+	"name": "TSX Template",
+	"scopeName": "source.tsx-template",
+	"patterns": [{ "include": "#jsx-comments" }, { "include": "source.tsx" }],
+	"repository": {
+		"jsx-comments": {
+			"patterns": [
+				{
+					"name": "comment.block.jsx",
+					"begin": "\\{\\s*/\\*",
+					"end": "\\*/\\s*\\}",
+					"captures": {
+						"0": { "name": "punctuation.definition.comment.jsx" }
+					}
+				}
+			]
+		}
+	}
+}

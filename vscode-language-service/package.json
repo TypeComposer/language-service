@@ -1,0 +1,72 @@
+{
+	"name": "lsp-sample",
+	"description": "A language server example",
+	"author": "Microsoft Corporation",
+	"license": "MIT",
+	"version": "1.0.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Microsoft/vscode-extension-samples"
+	},
+	"publisher": "vscode-samples",
+	"categories": [],
+	"keywords": [
+		"multi-root ready"
+	],
+	"engines": {
+		"vscode": "^1.100.0"
+	},
+	"main": "./client/out/extension",
+	"contributes": {
+		"languages": [
+			{
+				"id": "tsx-template",
+				"aliases": [
+					"TSX Template",
+					"tsx-template"
+				],
+				"extensions": [
+					".template"
+				],
+				"configuration": "./language/language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "tsx-template",
+				"scopeName": "source.tsx-template",
+				"path": "./syntaxes/tsx.tmLanguage.json"
+			}
+		],
+		"typescriptServerPlugins": [
+			{
+				"name": "./server/ts-plugin",
+				"enableForWorkspaceTypeScriptVersions": true
+			}
+		]
+	},
+	"activationEvents": [
+		"onLanguage:tsx-template"
+	],
+	"enabledApiProposals": [
+		"typescriptLanguageFeatures"
+	],
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -b",
+		"watch": "tsc -b -w",
+		"lint": "eslint",
+		"postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
+		"test": "sh ./scripts/e2e.sh"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.13.0",
+		"@stylistic/eslint-plugin": "^2.9.0",
+		"@types/mocha": "^10.0.6",
+		"@types/node": "^22",
+		"eslint": "^9.13.0",
+		"mocha": "^10.3.0",
+		"typescript": "^5.9.2",
+		"typescript-eslint": "^8.39.0"
+	}
+}
