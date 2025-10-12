@@ -1,14 +1,14 @@
 {
-  "name": "typecomposer-language-server",
-  "description": "A language server for TypeComposer",
+  "name": "typecomposer-template",
+  "description": "A language support extension for TypeComposer",
   "author": "zico15",
   "license": "MIT",
-  "version": "1.0.0",
+  "version": "0.0.17",
   "repository": {
     "type": "git",
     "url": "https://github.com/TypeComposer/language-service/tree/main/vscode-language-service"
   },
-  "publisher": "zico15",
+  "publisher": "typecomposer-language-support",
   "categories": [],
   "keywords": [
     "multi-root ready"
@@ -17,6 +17,7 @@
     "vscode": "^1.100.0"
   },
   "main": "./client/out/extension",
+  "icon": "images/icon.png",
   "contributes": {
     "languages": [
       {
@@ -37,12 +38,6 @@
         "scopeName": "source.tsx-template",
         "path": "./syntaxes/tsx.tmLanguage.json"
       }
-    ],
-    "typescriptServerPlugins": [
-      {
-        "name": "./server/ts-plugin",
-        "enableForWorkspaceTypeScriptVersions": true
-      }
     ]
   },
   "activationEvents": [
@@ -52,11 +47,11 @@
     "typescriptLanguageFeatures"
   ],
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -b",
+    "package": "vsce package",
+    "build": "tsc -b",
     "watch": "tsc -b -w",
     "lint": "eslint",
-    "postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
+    "postinstall": "cd client && npm install && cd ..",
     "test": "sh ./scripts/e2e.sh"
   },
   "dependencies": {
@@ -74,6 +69,7 @@
     "eslint": "^9.13.0",
     "mocha": "^10.3.0",
     "typescript": "^5.9.2",
-    "typescript-eslint": "^8.39.0"
+    "typescript-eslint": "^8.39.0",
+    "vsce": "^2.15.0"
   }
 }

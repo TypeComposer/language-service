@@ -103,6 +103,7 @@ async function hideVirtualFiles() {
 
 export async function activate(context: vscode.ExtensionContext) {
   await hideVirtualFiles();
+  let lastDoc: vscode.TextDocument | undefined;
 
   context.subscriptions.push(diagnostics);
 
@@ -125,20 +126,31 @@ export async function activate(context: vscode.ExtensionContext) {
   // Remove o .virtual.tsx quando o .template fecha
   context.subscriptions.push(
     vscode.workspace.onDidCloseTextDocument(async (doc) => {
-      if (doc.languageId === "tsx-template") {
-        const virtualUri = virtualFiles.get(doc.uri.fsPath);
-        if (virtualUri) {
-          try {
-            await fs.unlink(virtualUri.url.fsPath);
-          } catch {
-            // arquivo já removido
-          }
-          virtualFiles.delete(doc.uri.fsPath);
-          diagnostics.delete(doc.uri);
-        }
+      console.log("Document closed:", doc.uri.fsPath);
+      for (const [realPath, virt] of virtualFiles.entries()) {
+        try {
+          await fs.unlink(virt.url.fsPath);
+          console.log("Deleted virtual file:", virt.url.fsPath);
+        } catch {}
+        virtualFiles.delete(realPath);
       }
     })
   );
+  // // Loga mudança de foco (útil para debug)
+  // vscode.window.onDidChangeActiveTextEditor((editor) => {
+  //   console.log("Usuário clicou fora do editor (explorer, terminal, output, etc.)");
+  //   if (lastDoc && (!editor || editor.document.uri.fsPath !== lastDoc.uri.fsPath)) {
+  //     console.log("Documento perdeu o foco:", lastDoc.uri.fsPath);
+  //   }
+
+  //   if (editor) {
+  //     console.log("Novo documento ativo:", editor.document.uri.fsPath);
+  //     lastDoc = editor.document;
+  //   } else {
+  //     lastDoc = undefined;
+  //   }
+  //   console.log("Nenhum editor ativo (perdeu o foco)");
+  // });
 
   // Espelha diagnostics do virtual → template
   context.subscriptions.push(
@@ -207,11 +219,15 @@ export async function activate(context: vscode.ExtensionContext) {
 
           return new vscode.CompletionList(fixedItems, completions.isIncomplete);
         },
-      }
+      },
+      "<",
+      "/",
+      " ",
+      '"',
+      "."
     )
   );
 
-  // Hover: delega ao TS no arquivo virtual
   // Hover: delega ao TS no arquivo virtual
   context.subscriptions.push(
     vscode.languages.registerHoverProvider(
