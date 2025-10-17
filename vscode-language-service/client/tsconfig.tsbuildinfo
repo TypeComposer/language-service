@@ -1,1 +1,1 @@
-{"root":["./src/extension.ts","./src/transforme.ts"],"version":"5.9.2"}
+{"root":["./src/virtualfilecontroller.ts","./src/actions.ts","./src/extension.ts","./src/transforme.ts","./src/utils.ts"],"version":"5.9.2"}
