@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 import { Transforme } from "./transforme";
 import { Action, diagnostics } from "./actions";
 import { virtualFiles } from "./VirtualFileController";
+import { Utils } from "./utils";
 
 //new Map<string, { url: vscode.Uri; startPosition: vscode.Position }>();
 
@@ -21,13 +22,13 @@ export async function activate(context: vscode.ExtensionContext) {
   await hideVirtualFiles();
 
   const config = {
-    onDidChangeDiagnostics: true,
     onDidChangeTextDocument: true,
     onDidCloseTextDocument: true,
     onDidOpenTextDocument: true,
+    onDidChangeDiagnostics: true,
     registerHoverProvider: false,
     registerDefinitionProvider: false,
-    registerCompletionItemProvider: true,
+    registerCompletionItemProvider: false,
     registerCodeActionsProvider: false,
     registerReferenceProvider: false,
   };
@@ -90,6 +91,19 @@ export async function activate(context: vscode.ExtensionContext) {
         { language: "tsx-template" },
         {
           async provideCompletionItems(document, position, _token, _context) {
+            const lineText = document.lineAt(position.line).text;
+            const textBeforeCursor = lineText.substring(0, position.character);
+            const tagMatch = textBeforeCursor.match(/<([a-zA-Z]*)$/);
+            if (tagMatch) {
+              const prefix = tagMatch[1];
+              const tagCompletions = Utils.TAGS_HTML.filter((tag) => tag.startsWith(prefix)).map((tag) => {
+                const item = new vscode.CompletionItem(tag, vscode.CompletionItemKind.Snippet);
+                item.insertText = tag;
+                item.detail = "HTML Tag";
+                return item;
+              });
+              return Action.registerCompletionItemProvider(document, position, _token, _context, tagCompletions);
+            }
             return Action.registerCompletionItemProvider(document, position, _token, _context);
           },
         },

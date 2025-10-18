@@ -1,18 +1,67 @@
 import * as vscode from "vscode";
 
 export namespace Utils {
+  export const TAGS_HTML = [
+    "div",
+    "span",
+    "p",
+    "a",
+    "ul",
+    "li",
+    "button",
+    "input",
+    "form",
+    "header",
+    "footer",
+    "section",
+    "article",
+    "nav",
+    "main",
+    "aside",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "img",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "td",
+    "th",
+    "label",
+    "select",
+    "option",
+    "textarea",
+    "video",
+    "audio",
+    "canvas",
+    "svg",
+    "path",
+    "circle",
+    "rect",
+    "header",
+    "footer",
+    "section",
+    "article",
+    "nav",
+    "main",
+    "aside",
+  ];
   /**
    * Converte uma posição do .template (real) para o .virtual.tsx
    */
-  export function mapToVirtualPosition(templatePos: vscode.Position, start: vscode.Position): vscode.Position {
-    return new vscode.Position(start.line + templatePos.line, (templatePos.line === 0 ? start.character : 0) + templatePos.character);
+  export function mapToVirtualPosition(templatePos: vscode.Position, start: vscode.Position, offset: number): vscode.Position {
+    return new vscode.Position(start.line + templatePos.line - offset, (templatePos.line === 0 ? start.character : 0) + templatePos.character);
   }
 
   /**
    * Converte uma posição do .virtual.tsx para o .template
    */
-  export function mapToTemplatePosition(virtualPos: vscode.Position, start: vscode.Position): vscode.Position {
-    const check = new vscode.Position(virtualPos.line - start.line, virtualPos.line === start.line ? virtualPos.character - start.character : virtualPos.character);
+  export function mapToTemplatePosition(virtualPos: vscode.Position, start: vscode.Position, offset: number): vscode.Position {
+    const check = new vscode.Position(virtualPos.line - start.line + offset, virtualPos.line === start.line ? virtualPos.character - start.character : virtualPos.character);
 
     return new vscode.Position(check.line < 0 ? 0 : check.line, check.character < 0 ? 0 : check.character);
   }
@@ -20,8 +69,8 @@ export namespace Utils {
   /**
    * Converte uma posição do .virtual.tsx para o .template
    */
-  export function mapToTemplateRange(range: vscode.Range, start: vscode.Position): vscode.Range {
-    return new vscode.Range(mapToTemplatePosition(range.start, start), mapToTemplatePosition(range.end, start));
+  export function mapToTemplateRange(range: vscode.Range, start: vscode.Position, offset: number = 0): vscode.Range {
+    return new vscode.Range(mapToTemplatePosition(range.start, start, offset), mapToTemplatePosition(range.end, start, offset));
   }
 
   export function mapToVirtualRange(range: vscode.Range, start: vscode.Position): vscode.Range {

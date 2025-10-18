@@ -5,13 +5,21 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 
+interface ResultVirtualContent {
+  content: string;
+  startPosition: vscode.Position;
+  offset: number;
+  bodyRange: vscode.Range;
+  importRange: vscode.Range;
+}
+
 export namespace Transforme {
   export const EXTENSION_VIRTUAL = "tc.template.virtual.tsx";
 
   // Analisa todos os arquivos .tsx e .ts de uma pasta
   // Se já existir o método template() na classe alvo, substitui o conteúdo
   // Se não existir, cria o método template()
-  export function getVirtualContent(folderPath: string, className: string, content: string): { content: string; startPosition: vscode.Position } {
+  export function getVirtualContent(folderPath: string, className: string, content: string): ResultVirtualContent {
     let startPosition = new vscode.Position(0, 0);
     try {
       const files = fs.readdirSync(folderPath);
@@ -29,7 +37,13 @@ export namespace Transforme {
     } catch (err) {
       console.error("Erro ao ler a pasta:", err);
     }
-    return { content, startPosition };
+    return {
+      content,
+      startPosition,
+      offset: 0,
+      importRange: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0)),
+      bodyRange: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0)),
+    };
   }
 
   function buildTemplateReturn() {
@@ -40,7 +54,7 @@ export namespace Transforme {
    * Retorna a posição inicial dentro do arquivo virtual
    * onde o conteúdo original do .template foi injetado.
    */
-  function getContentStartPosition(virtualText: string, offset: number): vscode.Position {
+  function getContentStartPosition(virtualText: string): vscode.Position {
     const marker = "return (<>/*__TC_START__*//*__TC_END__*/</>);";
     const idx = virtualText.indexOf(marker);
     if (idx < 0) return new vscode.Position(0, 0);
@@ -50,12 +64,11 @@ export namespace Transforme {
     const lines = before.split("\n");
     const line = lines.length - 1;
     const character = lines[lines.length - 1].length;
-    return new vscode.Position(line + offset, character);
+    return new vscode.Position(line, character);
   }
 
   export function splitImportsAndCode(code: string): { imports: string; codeWithoutImports: string; offset: number } {
     try {
-      const lines = code.split("\n");
       let offset = code.indexOf("<");
       const imports = code.slice(0, offset);
       const offsetLine = imports.split("\n").length - 1;
@@ -67,7 +80,7 @@ export namespace Transforme {
     }
   }
 
-  function analisar(code: string, className: string, content: string): { content: string; startPosition: vscode.Position } | null {
+  function analisar(code: string, className: string, content: string): ResultVirtualContent | null {
     const { codeWithoutImports, imports, offset } = splitImportsAndCode(content);
 
     // ✅ Parse com Recast + babel-ts (preserva comentários e formato)
@@ -104,8 +117,10 @@ export namespace Transforme {
     if (!modified) return null;
 
     const newCode = `${imports.trim()}${recast.print(ast).code}`;
+    const importRange = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(imports.split("\n").length - 1, imports.split("\n").slice(-1)[0].length));
+    const bodyRange = new vscode.Range(startPosition, new vscode.Position(startPosition.line + codeWithoutImports.split("\n").length - 1, codeWithoutImports.split("\n").slice(-1)[0].length));
 
-    startPosition = getContentStartPosition(newCode, offset);
+    startPosition = getContentStartPosition(newCode);
 
     if (newCode) {
       const newContent = newCode.replace(
@@ -114,9 +129,14 @@ export namespace Transforme {
 ${codeWithoutImports}
     );`
       );
-      return { content: newContent, startPosition };
+      return { content: newContent, startPosition, offset, importRange, bodyRange };
     }
-
-    return { content: code, startPosition: new vscode.Position(0, 0) };
+    return {
+      content: code,
+      startPosition: new vscode.Position(0, 0),
+      offset,
+      importRange: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0)),
+      bodyRange: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0)),
+    };
   }
 }

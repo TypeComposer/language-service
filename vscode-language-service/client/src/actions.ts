@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { Transforme } from "./transforme";
 import { virtualFiles } from "./VirtualFileController";
 import { Utils } from "./utils";
+import { off } from "process";
 
 export const diagnostics = vscode.languages.createDiagnosticCollection("tsx-template");
 
@@ -9,43 +10,49 @@ export namespace Action {
   //
   export function onDidChangeDiagnostics(event: vscode.DiagnosticChangeEvent) {
     for (const uri of event.uris) {
-      if (uri.fsPath.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`)) {
-        const entry = [...virtualFiles.entries()].find(([, virt]) => virt.url.fsPath === uri.fsPath);
-        // console.log("Diagnostics changed for virtual file:", uri, " entry:", entry);
-        if (!entry) continue;
+      try {
+        if (uri.fsPath.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`)) {
+          const entry = [...virtualFiles.entries()].find(([, virt]) => virt.url.fsPath === uri.fsPath);
+          if (!entry) continue;
 
-        const [realPath, virtualUri] = entry;
-        const realUri = vscode.Uri.file(realPath);
-        const diags = vscode.languages.getDiagnostics(virtualUri.url);
+          const [realPath, virtualUri] = entry;
+          const realUri = vscode.Uri.file(realPath);
+          const diags = vscode.languages.getDiagnostics(virtualUri.url);
 
-        const mapped = diags.map((d) => new vscode.Diagnostic(Utils.mapToTemplateRange(d.range, virtualUri.startPosition), d.message, d.severity));
-        console.log("Diagnostics Mapped diagnostics for", diags, mapped);
-        diagnostics.set(realUri, mapped);
-      }
+          const mapped = diags
+            .filter((e) => e.range.start.line >= virtualUri.startPosition.line)
+            .map((d) => new vscode.Diagnostic(Utils.mapToTemplateRange(d.range, virtualUri.startPosition, virtualUri.offset), d.message, d.severity));
+          diagnostics.set(realUri, mapped);
+        }
+      } catch (err) {}
     }
   }
   //
   export async function registerHoverProvider(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): Promise<vscode.ProviderResult<vscode.Hover>> {
-    const virtualUri = virtualFiles.get(document.uri.fsPath);
-    if (!virtualUri) return null;
+    try {
+      const virtualUri = virtualFiles.get(document.uri.fsPath);
+      if (!virtualUri) return null;
 
-    const hovers = await vscode.commands.executeCommand<vscode.Hover[]>("vscode.executeHoverProvider", virtualUri.url, Utils.mapToVirtualPosition(position, virtualUri.startPosition));
+      const hovers = await vscode.commands.executeCommand<vscode.Hover[]>("vscode.executeHoverProvider", virtualUri.url, Utils.mapToVirtualPosition(position, virtualUri.startPosition, virtualUri.offset));
 
-    if (!hovers || hovers.length === 0) {
+      if (!hovers || hovers.length === 0) {
+        return null;
+      }
+
+      // Normaliza ranges
+      for (const h of hovers) {
+        if (h.range) {
+          h.range = Utils.mapToTemplateRange(h.range, virtualUri.startPosition);
+        }
+      }
+
+      // Junta todos os conteúdos em um só Hover
+      const contents = hovers.flatMap((h) => (Array.isArray(h.contents) ? h.contents : [h.contents]));
+
+      return new vscode.Hover(contents, hovers[0].range);
+    } catch (err) {
       return null;
     }
-
-    // Normaliza ranges
-    for (const h of hovers) {
-      if (h.range) {
-        h.range = Utils.mapToTemplateRange(h.range, virtualUri.startPosition);
-      }
-    }
-
-    // Junta todos os conteúdos em um só Hover
-    const contents = hovers.flatMap((h) => (Array.isArray(h.contents) ? h.contents : [h.contents]));
-
-    return new vscode.Hover(contents, hovers[0].range);
   }
   //
   export async function registerDefinitionProvider(
@@ -53,10 +60,14 @@ export namespace Action {
     position: vscode.Position,
     token: vscode.CancellationToken
   ): Promise<vscode.ProviderResult<vscode.Definition | vscode.DefinitionLink[]>> {
-    const virt = virtualFiles.get(document.uri.fsPath);
-    if (!virt) return [];
-    const defs = await vscode.commands.executeCommand<vscode.Location[]>("vscode.executeDefinitionProvider", virt.url, Utils.mapToVirtualPosition(position, virt.startPosition));
-    return defs?.map((def) => new vscode.Location(def.uri, Utils.mapToTemplateRange(def.range, virt.startPosition))) ?? [];
+    try {
+      const virt = virtualFiles.get(document.uri.fsPath);
+      if (!virt) return [];
+      const defs = await vscode.commands.executeCommand<vscode.Location[]>("vscode.executeDefinitionProvider", virt.url, Utils.mapToVirtualPosition(position, virt.startPosition, virt.offset));
+      return defs?.map((def) => new vscode.Location(def.uri, Utils.mapToTemplateRange(def.range, virt.startPosition))) ?? [];
+    } catch (err) {
+      return [];
+    }
   }
   //
   export async function registerCodeActionsProvider(
@@ -113,57 +124,89 @@ export namespace Action {
     context: vscode.ReferenceContext,
     token: vscode.CancellationToken
   ): Promise<vscode.ProviderResult<vscode.Location[]>> {
-    const virt = virtualFiles.get(document.uri.fsPath);
-    if (!virt) return [];
-    const refs = await vscode.commands.executeCommand<vscode.Location[]>("vscode.executeReferenceProvider", virt.url, Utils.mapToVirtualPosition(position, virt.startPosition));
-    return refs?.map((ref) => new vscode.Location(ref.uri, Utils.mapToTemplateRange(ref.range, virt.startPosition))) ?? [];
+    try {
+      const virt = virtualFiles.get(document.uri.fsPath);
+      if (!virt) return [];
+      const refs = await vscode.commands.executeCommand<vscode.Location[]>("vscode.executeReferenceProvider", virt.url, Utils.mapToVirtualPosition(position, virt.startPosition, virt.offset));
+      return refs?.map((ref) => new vscode.Location(ref.uri, Utils.mapToTemplateRange(ref.range, virt.startPosition))) ?? [];
+    } catch (err) {
+      return [];
+    }
   }
   //
   export async function registerCompletionItemProvider(
     document: vscode.TextDocument,
     position: vscode.Position,
     token: vscode.CancellationToken,
-    context: vscode.CompletionContext
+    context: vscode.CompletionContext,
+    tagCompletions: vscode.CompletionItem[] = []
   ): Promise<vscode.ProviderResult<vscode.CompletionItem[] | vscode.CompletionList<vscode.CompletionItem>>> {
-    const virtualUri = virtualFiles.get(document.uri.fsPath);
-    if (!virtualUri) return [];
-    const doc = await vscode.workspace.openTextDocument(virtualUri.url);
-    console.log("Providing completions for virtual file:", { url: virtualUri.url.fsPath, pos: Utils.mapToVirtualPosition(position, virtualUri.startPosition), startPosition: virtualUri.startPosition });
-    const completions = (await vscode.commands.executeCommand<vscode.CompletionList>("vscode.executeCompletionItemProvider", doc.uri, Utils.mapToVirtualPosition(position, virtualUri.startPosition))) ?? [];
-    const fixedItems = completions.items.map((item) => {
-      if (item.range) {
-        if (item.range instanceof vscode.Range) {
-          const start = Utils.mapToTemplatePosition(item.range.start, virtualUri.startPosition);
-          const end = Utils.mapToTemplatePosition(item.range.end, virtualUri.startPosition);
-          item.range = new vscode.Range(start, end);
-        } else if ("inserting" in item.range) {
-          // CompletionItemRange
-          item.range = {
-            inserting: new vscode.Range(Utils.mapToTemplatePosition(item.range.inserting.start, virtualUri.startPosition), Utils.mapToTemplatePosition(item.range.inserting.end, virtualUri.startPosition)),
-            replacing: new vscode.Range(Utils.mapToTemplatePosition(item.range.replacing.start, virtualUri.startPosition), Utils.mapToTemplatePosition(item.range.replacing.end, virtualUri.startPosition)),
-          };
+    try {
+      const virtualUri = virtualFiles.get(document.uri.fsPath);
+      if (!virtualUri) return [];
+      const doc = await vscode.workspace.openTextDocument(virtualUri.url);
+      console.log("Providing completions for virtual file:", {
+        url: virtualUri.url.fsPath,
+        pos: Utils.mapToVirtualPosition(position, virtualUri.startPosition, virtualUri.offset),
+        startPosition: virtualUri.startPosition,
+        offset: virtualUri.offset,
+      });
+      const completions =
+        (await vscode.commands.executeCommand<vscode.CompletionList>("vscode.executeCompletionItemProvider", doc.uri, Utils.mapToVirtualPosition(position, virtualUri.startPosition, virtualUri.offset))) ??
+        [];
+      const fixedItems = completions.items.map((item) => {
+        if (item.range) {
+          if (item.range instanceof vscode.Range) {
+            const start = Utils.mapToTemplatePosition(item.range.start, virtualUri.startPosition, virtualUri.offset);
+            const end = Utils.mapToTemplatePosition(item.range.end, virtualUri.startPosition, virtualUri.offset);
+            item.range = new vscode.Range(start, end);
+          } else if ("inserting" in item.range) {
+            // CompletionItemRange
+            item.range = {
+              inserting: new vscode.Range(
+                Utils.mapToTemplatePosition(item.range.inserting.start, virtualUri.startPosition, virtualUri.offset),
+                Utils.mapToTemplatePosition(item.range.inserting.end, virtualUri.startPosition, virtualUri.offset)
+              ),
+              replacing: new vscode.Range(
+                Utils.mapToTemplatePosition(item.range.replacing.start, virtualUri.startPosition, virtualUri.offset),
+                Utils.mapToTemplatePosition(item.range.replacing.end, virtualUri.startPosition, virtualUri.offset)
+              ),
+            };
+          }
         }
-      }
-      if (item.textEdit) {
-        const edit = item.textEdit as vscode.TextEdit;
-        item.textEdit = new vscode.TextEdit(
-          new vscode.Range(Utils.mapToTemplatePosition(edit.range.start, virtualUri.startPosition), Utils.mapToTemplatePosition(edit.range.end, virtualUri.startPosition)),
-          edit.newText
-        );
-      }
-
-      // Corrige edições adicionais
-      if (item.additionalTextEdits) {
-        item.additionalTextEdits = item.additionalTextEdits.map((edit) => {
-          return new vscode.TextEdit(
-            new vscode.Range(Utils.mapToTemplatePosition(edit.range.start, virtualUri.startPosition), Utils.mapToTemplatePosition(edit.range.end, virtualUri.startPosition)),
+        if (item.textEdit) {
+          const edit = item.textEdit as vscode.TextEdit;
+          item.textEdit = new vscode.TextEdit(
+            new vscode.Range(
+              Utils.mapToTemplatePosition(edit.range.start, virtualUri.startPosition, virtualUri.offset),
+              Utils.mapToTemplatePosition(edit.range.end, virtualUri.startPosition, virtualUri.offset)
+            ),
             edit.newText
           );
-        });
-      }
-      return item;
-    });
+        }
 
-    return new vscode.CompletionList(fixedItems, completions.isIncomplete);
+        // Corrige edições adicionais
+        if (item.additionalTextEdits) {
+          item.additionalTextEdits = item.additionalTextEdits.map((edit) => {
+            return new vscode.TextEdit(
+              new vscode.Range(
+                Utils.mapToTemplatePosition(edit.range.start, virtualUri.startPosition, virtualUri.offset),
+                Utils.mapToTemplatePosition(edit.range.end, virtualUri.startPosition, virtualUri.offset)
+              ),
+              edit.newText
+            );
+          });
+        }
+        return item;
+      });
+
+      console.log("Completions received from virtual:", completions);
+
+      console.warn("Completions received from virtual:", fixedItems);
+
+      return new vscode.CompletionList([...fixedItems, ...tagCompletions], completions.isIncomplete);
+    } catch (err) {
+      return [];
+    }
   }
 }

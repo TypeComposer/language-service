@@ -5,8 +5,11 @@ import { Transforme } from "./transforme";
 
 export interface ResultVirtualFile {
   url: vscode.Uri;
+  offset: number;
   startPosition: vscode.Position;
   content: string;
+  bodyRange: vscode.Range;
+  importRange: vscode.Range;
 }
 
 function makeVirtualUri(document: vscode.TextDocument): vscode.Uri {
@@ -23,12 +26,12 @@ class VirtualFileController {
     const folder = path.dirname(document.uri.fsPath);
     const baseName = path.basename(document.uri.fsPath, ".template");
     const virtualUri = makeVirtualUri(document);
-    const { content, startPosition } = Transforme.getVirtualContent(folder, baseName, document.getText());
+    const { content, startPosition, offset, bodyRange, importRange } = Transforme.getVirtualContent(folder, baseName, document.getText());
     //   const content = getVirtualContent(document.getText());
 
     try {
       await fs.writeFile(virtualUri.fsPath, content, "utf8");
-      this.files.set(document.uri.fsPath, { url: virtualUri, startPosition: startPosition, content });
+      this.files.set(document.uri.fsPath, { url: virtualUri, startPosition: startPosition, content, offset, bodyRange, importRange });
     } catch (err) {
       console.error("Erro ao salvar arquivo virtual:", err);
       this.files.delete(document.uri.fsPath);
