@@ -1,14 +1,9 @@
 import * as vscode from "vscode";
-import * as path from "path";
-import * as fs from "fs/promises";
 import { Transforme } from "./transforme";
 import { Action, diagnostics } from "./actions";
 import { virtualFiles } from "./VirtualFileController";
 import { Utils } from "./utils";
-
-//new Map<string, { url: vscode.Uri; startPosition: vscode.Position }>();
-
-// async function syncVirtualFile(document: vscode.TextDocument) {}
+import { Service } from "./service-host";
 
 // Esconde os arquivos .virtual.tsx na árvore de arquivos
 async function hideVirtualFiles() {
@@ -20,20 +15,28 @@ async function hideVirtualFiles() {
 
 export async function activate(context: vscode.ExtensionContext) {
   await hideVirtualFiles();
+  const host = Service.host;
+
+  // console.log("TypeComposer Language Service ativado!");
+  // console.log("Configurações do compilador:", host.getCompilationSettings());
+  // console.log("getScriptFileNames:", host.getScriptFileNames());
 
   const config = {
     onDidChangeTextDocument: true,
     onDidCloseTextDocument: true,
     onDidOpenTextDocument: true,
-    onDidChangeDiagnostics: true,
+    // actions
+    onDidChangeDiagnostics: false,
     registerHoverProvider: false,
     registerDefinitionProvider: false,
-    registerCompletionItemProvider: false,
+    registerCompletionItemProvider: true,
     registerCodeActionsProvider: false,
     registerReferenceProvider: false,
   };
 
   context.subscriptions.push(diagnostics);
+
+  if (config.onDidChangeDiagnostics) context.subscriptions.push(vscode.languages.onDidChangeDiagnostics(Action.onDidChangeDiagnostics));
 
   // Cria arquivos virtuais para docs já abertos
   for (const doc of vscode.workspace.textDocuments) {
@@ -82,7 +85,6 @@ export async function activate(context: vscode.ExtensionContext) {
   // });
 
   // Espelha diagnostics do virtual → template
-  if (config.onDidChangeDiagnostics) context.subscriptions.push(vscode.languages.onDidChangeDiagnostics(Action.onDidChangeDiagnostics));
 
   // Completion: delega ao TS no arquivo virtual
   if (config.registerCompletionItemProvider)

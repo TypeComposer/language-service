@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs/promises";
 import { Transforme } from "./transforme";
+import { Service } from "./service-host";
 
 export interface ResultVirtualFile {
   url: vscode.Uri;
@@ -30,7 +31,8 @@ class VirtualFileController {
     //   const content = getVirtualContent(document.getText());
 
     try {
-      await fs.writeFile(virtualUri.fsPath, content, "utf8");
+      // await fs.writeFile(virtualUri.fsPath, content, "utf8");
+      Service.files.set(virtualUri.fsPath, content);
       this.files.set(document.uri.fsPath, { url: virtualUri, startPosition: startPosition, content, offset, bodyRange, importRange });
     } catch (err) {
       console.error("Erro ao salvar arquivo virtual:", err);
