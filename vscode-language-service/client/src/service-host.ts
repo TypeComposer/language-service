@@ -5,35 +5,26 @@ import { Transforme } from "./transforme";
 
 let parsed!: ts.ParsedCommandLine;
 
-function getCompilerOptions(): ts.CompilerOptions {
-  const configPath = "/Users/Ezequiel/Documents/TypeComposer/docs/tsconfig.json";
-  //ts.findConfigFile(process.cwd(), ts.sys.fileExists, "tsconfig.json");
+const projectPath = path.resolve("/Users/Ezequiel/Documents/TypeComposer/docs", "tsconfig.json");
+const configFile = ts.readConfigFile(projectPath, ts.sys.readFile);
 
-  let compilerOptions: ts.CompilerOptions = {};
-
-  if (configPath) {
-    const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
-    parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, path.dirname(configPath));
-    compilerOptions = parsed.options;
-  } else {
-    console.warn("⚠️ Nenhum tsconfig.json encontrado, usando opções padrão.");
-    compilerOptions = {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ESNext,
-      strict: true,
-    };
-  }
-  return compilerOptions;
+function getParsedCommandLine(): ts.ParsedCommandLine {
+  const parsedConfig = ts.parseJsonConfigFileContent(configFile.config, ts.sys, path.dirname(projectPath));
+  console.log("parsedConfig", parsedConfig);
+  return parsedConfig;
 }
 
 export namespace Service {
   //
-  export const files = new Map<string, string>();
+  const files = new Map<string, string>();
+
+  export const parsedConfig = getParsedCommandLine();
+
   //
-  export const compilerOptions = getCompilerOptions();
-  //
-  export const host: ts.LanguageServiceHost = {
-    getScriptFileNames: () => Array.from(new Set<string>([...parsed.fileNames.map((f) => path.resolve(f)), ...files.keys()])),
+  export const host: ts.LanguageServiceHost & {
+    updateFile: (fileName: string, content: string) => void;
+  } = {
+    getScriptFileNames: () => Array.from(new Set<string>([...parsedConfig.fileNames.map((f) => path.resolve(f)), ...files.keys()])),
     getScriptVersion: () => "1",
 
     getScriptSnapshot: (fileName) => {
@@ -45,10 +36,13 @@ export namespace Service {
       const text = files.get(normalized) ?? (fs.existsSync(normalized) ? fs.readFileSync(normalized, "utf8") : undefined);
       return text ? ts.ScriptSnapshot.fromString(text) : undefined;
     },
-
+    updateFile: (fileName: string, content: string) => {
+      files.set(fileName, content);
+      languageService.cleanupSemanticCache();
+    },
     getCurrentDirectory: () => process.cwd(),
 
-    getCompilationSettings: () => compilerOptions, // ← usa o tsconfig do projeto
+    getCompilationSettings: () => parsedConfig.options, // ← usa o tsconfig do projeto
 
     getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
 
@@ -57,7 +51,6 @@ export namespace Service {
     readFile: (fileName) => {
       const normalized = path.resolve(fileName);
       if (fileName.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`)) {
-        console.log("Reading file:", fileName);
         return files.get(fileName) ?? "";
       }
       return fs.readFileSync(normalized, "utf8");

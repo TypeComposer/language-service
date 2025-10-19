@@ -2,49 +2,20 @@ import * as t from "@babel/types";
 import * as recast from "recast";
 import * as babelParser from "recast/parsers/babel-ts";
 import * as vscode from "vscode";
+import { IRange } from "./utils";
 import * as fs from "fs";
-import * as path from "path";
-
-interface ResultVirtualContent {
-  content: string;
-  startPosition: vscode.Position;
-  offset: number;
-  bodyRange: vscode.Range;
-  importRange: vscode.Range;
-}
+import { ResultVirtualFile } from "./VirtualFileController";
 
 export namespace Transforme {
   export const EXTENSION_VIRTUAL = "tc.template.virtual.tsx";
 
+  function emptyRange() {
+    return new vscode.Range(new vscode.Position(-1, -1), new vscode.Position(-1, -1));
+  }
+
   // Analisa todos os arquivos .tsx e .ts de uma pasta
   // Se já existir o método template() na classe alvo, substitui o conteúdo
   // Se não existir, cria o método template()
-  export function getVirtualContent(folderPath: string, className: string, content: string): ResultVirtualContent {
-    let startPosition = new vscode.Position(0, 0);
-    try {
-      const files = fs.readdirSync(folderPath);
-      for (const file of files) {
-        if (!file.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`) && (file.endsWith(".tsx") || file.endsWith(".ts"))) {
-          const filePath = path.join(folderPath, file);
-          const code = fs.readFileSync(filePath, "utf-8");
-
-          const newCode = analisar(code, className, content);
-          if (newCode) {
-            return newCode;
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Erro ao ler a pasta:", err);
-    }
-    return {
-      content,
-      startPosition,
-      offset: 0,
-      importRange: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0)),
-      bodyRange: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0)),
-    };
-  }
 
   function buildTemplateReturn() {
     return t.returnStatement(t.parenthesizedExpression(t.jsxFragment(t.jsxOpeningFragment(), t.jsxClosingFragment(), [t.jsxText("/*__TC_START__*/"), t.jsxText("/*__TC_END__*/")])));
@@ -54,46 +25,46 @@ export namespace Transforme {
    * Retorna a posição inicial dentro do arquivo virtual
    * onde o conteúdo original do .template foi injetado.
    */
-  function getContentStartPosition(virtualText: string): vscode.Position {
+  function getContentStartPosition(virtualText: string, code: string): IRange {
     const marker = "return (<>/*__TC_START__*//*__TC_END__*/</>);";
     const idx = virtualText.indexOf(marker);
-    if (idx < 0) return new vscode.Position(0, 0);
+    if (idx < 0) return IRange.invalid();
 
-    const startOffset = idx + marker.length + 1; // +1 por causa do \n logo após o marcador
-    const before = virtualText.slice(0, startOffset);
-    const lines = before.split("\n");
-    const line = lines.length - 1;
-    const character = lines[lines.length - 1].length;
-    return new vscode.Position(line, character);
+    // const startOffset = idx + marker.length + 1; // +1 por causa do \n logo após o marcador
+    const before = virtualText.slice(0, idx + marker.length + 1 - "/*__TC_START__*//*__TC_END__*/</>);".length);
+    console.log("before:", before.length);
+    fs.writeFileSync(`/Users/Ezequiel/Documents/TypeComposer/docs/src/components/sidebar/test.text`, before, "utf8");
+    return new IRange(before.length, before.length + code.length, 0, "");
   }
 
-  export function splitImportsAndCode(code: string): { imports: string; codeWithoutImports: string; offset: number } {
+  export function splitImportsAndCode(code: string): { imports: string; codeWithoutImports: string; importRange: IRange } {
     try {
-      let offset = code.indexOf("<");
+      const offset = code.indexOf("<");
       const imports = code.slice(0, offset);
-      const offsetLine = imports.split("\n").length - 1;
       const codeWithoutImports = code.slice(offset);
-      return { imports, codeWithoutImports, offset: offsetLine };
+      // const importLines = imports.split("\n");
+      const importRange = imports.length ? new IRange(0, imports.length, 0, "") : IRange.invalid();
+
+      return { imports, codeWithoutImports, importRange };
     } catch (err) {
       console.error("Erro ao separar imports e código:", err);
-      return { imports: "", codeWithoutImports: code, offset: 0 };
+      return { imports: "", codeWithoutImports: code, importRange: IRange.invalid() };
     }
   }
 
-  function analisar(code: string, className: string, content: string): ResultVirtualContent | null {
-    const { codeWithoutImports, imports, offset } = splitImportsAndCode(content);
+  export function analisar(virtualFile: ResultVirtualFile, code: string): boolean {
+    const { codeWithoutImports, imports, importRange } = splitImportsAndCode(virtualFile.content);
 
     // ✅ Parse com Recast + babel-ts (preserva comentários e formato)
     const ast = recast.parse(code, { parser: babelParser });
 
     let modified = false;
-    let startPosition = new vscode.Position(0, 0);
 
     // ✅ Caminha pelo AST usando Recast Visitor API
     recast.types.visit(ast, {
       visitClassDeclaration(path) {
         const node = path.node;
-        if (node.id?.name === className) {
+        if (node.id?.name === virtualFile.className) {
           // @ts-ignore
           let templateMethod = node.body.body.find((m) => t.isClassMethod(m) && t.isIdentifier(m.key) && m.key.name === "template") as t.ClassMethod | undefined;
 
@@ -114,29 +85,26 @@ export namespace Transforme {
       },
     });
 
-    if (!modified) return null;
+    if (!modified) return false;
 
-    const newCode = `${imports.trim()}${recast.print(ast).code}`;
-    const importRange = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(imports.split("\n").length - 1, imports.split("\n").slice(-1)[0].length));
-    const bodyRange = new vscode.Range(startPosition, new vscode.Position(startPosition.line + codeWithoutImports.split("\n").length - 1, codeWithoutImports.split("\n").slice(-1)[0].length));
+    const virualContent = `${imports}${recast.print(ast).code}`;
 
-    startPosition = getContentStartPosition(newCode);
+    const bodyRange = getContentStartPosition(virualContent, virtualFile.content);
 
-    if (newCode) {
-      const newContent = newCode.replace(
+    if (virualContent) {
+      const newContent = virualContent.replace(
         "return (<>/*__TC_START__*//*__TC_END__*/</>);",
-        `return (
+        `return (<>
 ${codeWithoutImports}
-    );`
+   </>);`
       );
-      return { content: newContent, startPosition, offset, importRange, bodyRange };
+      bodyRange.startLine = bodyRange.getLineOffset(bodyRange.start, newContent).line;
+      bodyRange.line = imports.split("\n").length - 1;
+      virtualFile.tsContent = code;
+      virtualFile.virualContent = newContent;
+      virtualFile.bodyRange = bodyRange;
+      virtualFile.importRange = importRange;
     }
-    return {
-      content: code,
-      startPosition: new vscode.Position(0, 0),
-      offset,
-      importRange: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0)),
-      bodyRange: new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0)),
-    };
+    return true;
   }
 }

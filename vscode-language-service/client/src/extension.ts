@@ -4,6 +4,7 @@ import { Action, diagnostics } from "./actions";
 import { virtualFiles } from "./VirtualFileController";
 import { Utils } from "./utils";
 import { Service } from "./service-host";
+import ts = require("typescript");
 
 // Esconde os arquivos .virtual.tsx na árvore de arquivos
 async function hideVirtualFiles() {
@@ -22,9 +23,8 @@ export async function activate(context: vscode.ExtensionContext) {
   // console.log("getScriptFileNames:", host.getScriptFileNames());
 
   const config = {
-    onDidChangeTextDocument: true,
-    onDidCloseTextDocument: true,
-    onDidOpenTextDocument: true,
+    onDidCloseTextDocument: false,
+    onDidOpenTextDocument: false,
     // actions
     onDidChangeDiagnostics: false,
     registerHoverProvider: false,
@@ -36,24 +36,23 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(diagnostics);
 
-  if (config.onDidChangeDiagnostics) context.subscriptions.push(vscode.languages.onDidChangeDiagnostics(Action.onDidChangeDiagnostics));
+  // if (config.onDidChangeDiagnostics) context.subscriptions.push(vscode.languages.onDidChangeDiagnostics(Action.onDidChangeDiagnostics));
 
   // Cria arquivos virtuais para docs já abertos
   for (const doc of vscode.workspace.textDocuments) {
     if (doc.languageId === "tsx-template") {
-      await virtualFiles.syncFile(doc);
+      await virtualFiles.syncFile(doc, diagnostics);
     }
   }
 
   // Cria/atualiza virtuais ao abrir/mudar .template
-  if (config.onDidOpenTextDocument) context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(virtualFiles.syncFile.bind(virtualFiles)));
+  if (config.onDidOpenTextDocument) context.subscriptions.push(vscode.workspace.onDidOpenTextDocument((e) => virtualFiles.syncFile(e, diagnostics)));
 
-  if (config.onDidChangeTextDocument)
-    context.subscriptions.push(
-      vscode.workspace.onDidChangeTextDocument(async (e) => {
-        await virtualFiles.syncFile(e.document);
-      })
-    );
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument(async (e) => {
+      await virtualFiles.syncFile(e.document, diagnostics);
+    })
+  );
 
   // Remove o .virtual.tsx quando o .template fecha
   if (config.onDidCloseTextDocument)
@@ -117,55 +116,55 @@ export async function activate(context: vscode.ExtensionContext) {
       )
     );
 
-  // Hover: delega ao TS no arquivo virtual
-  if (config.registerHoverProvider)
-    context.subscriptions.push(
-      vscode.languages.registerHoverProvider(
-        { language: "tsx-template" },
-        {
-          async provideHover(document, position) {
-            return Action.registerHoverProvider(document, position, new vscode.CancellationTokenSource().token);
-          },
-        }
-      )
-    );
+  // // Hover: delega ao TS no arquivo virtual
+  // if (config.registerHoverProvider)
+  //   context.subscriptions.push(
+  //     vscode.languages.registerHoverProvider(
+  //       { language: "tsx-template" },
+  //       {
+  //         async provideHover(document, position) {
+  //           return Action.registerHoverProvider(document, position, new vscode.CancellationTokenSource().token);
+  //         },
+  //       }
+  //     )
+  //   );
 
-  // Definitions
-  if (config.registerDefinitionProvider)
-    context.subscriptions.push(
-      vscode.languages.registerDefinitionProvider(
-        { language: "tsx-template" },
-        {
-          async provideDefinition(document, position) {
-            return Action.registerDefinitionProvider(document, position, new vscode.CancellationTokenSource().token);
-          },
-        }
-      )
-    );
+  // // Definitions
+  // if (config.registerDefinitionProvider)
+  //   context.subscriptions.push(
+  //     vscode.languages.registerDefinitionProvider(
+  //       { language: "tsx-template" },
+  //       {
+  //         async provideDefinition(document, position) {
+  //           return Action.registerDefinitionProvider(document, position, new vscode.CancellationTokenSource().token);
+  //         },
+  //       }
+  //     )
+  //   );
 
-  // Quick Fixes
-  if (config.registerCodeActionsProvider)
-    context.subscriptions.push(
-      vscode.languages.registerCodeActionsProvider(
-        { language: "tsx-template" },
-        {
-          async provideCodeActions(document, range, context, token) {
-            return Action.registerCodeActionsProvider(document, range, context, token);
-          },
-        }
-      )
-    );
+  // // Quick Fixes
+  // if (config.registerCodeActionsProvider)
+  //   context.subscriptions.push(
+  //     vscode.languages.registerCodeActionsProvider(
+  //       { language: "tsx-template" },
+  //       {
+  //         async provideCodeActions(document, range, context, token) {
+  //           return Action.registerCodeActionsProvider(document, range, context, token);
+  //         },
+  //       }
+  //     )
+  //   );
 
-  // References
-  if (config.registerReferenceProvider)
-    context.subscriptions.push(
-      vscode.languages.registerReferenceProvider(
-        { language: "tsx-template" },
-        {
-          async provideReferences(document, position, context, _token) {
-            return Action.registerReferenceProvider(document, position, context, _token);
-          },
-        }
-      )
-    );
+  // // References
+  // if (config.registerReferenceProvider)
+  //   context.subscriptions.push(
+  //     vscode.languages.registerReferenceProvider(
+  //       { language: "tsx-template" },
+  //       {
+  //         async provideReferences(document, position, context, _token) {
+  //           return Action.registerReferenceProvider(document, position, context, _token);
+  //         },
+  //       }
+  //     )
+  //   );
 }
