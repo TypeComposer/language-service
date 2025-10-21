@@ -4,8 +4,6 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { Transforme } from "./transforme";
 
-let parsed!: ts.ParsedCommandLine;
-
 const projectPath = path.resolve("/Users/Ezequiel/Documents/TypeComposer/docs", "tsconfig.json");
 const configFile = ts.readConfigFile(projectPath, ts.sys.readFile);
 
@@ -51,14 +49,6 @@ export namespace Service {
     getCompilationSettings: () => parsedConfig.options, // ← usa o tsconfig do projeto
 
     fileExists: (fileName) => files.has(fileName) || fs.existsSync(fileName),
-
-    // readFile: (fileName) => {
-    //   const normalized = path.resolve(fileName);
-    //   if (fileName.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`)) {
-    //     return files.get(fileName) ?? "";
-    //   }
-    //   return fs.readFileSync(normalized, "utf8");
-    // },
     getDefaultLibFileName: ts.getDefaultLibFilePath,
     readFile: ts.sys.readFile,
     readDirectory: ts.sys.readDirectory,
