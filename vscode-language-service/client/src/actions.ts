@@ -217,8 +217,23 @@ export namespace Action {
       // console.log("Mapped position for completions:", { startPosition, vsPosition, pos, url: virtualUri?.url.fsPath });
       //   return new vscode.CompletionList([...fixedItems, ...tagCompletions], completions.isIncomplete);
       console.log("Fetching completions from TS Language Service at position:", pos, "in file:", virtualUri?.url.fsPath);
-      const completions = Service.languageService.getCompletionsAtPosition(virtualUri?.url.fsPath, pos, {}) || [];
-      console.log("Completions:", completions);
+      const completions =
+        Service.languageService.getCompletionsAtPosition(virtualUri?.url.fsPath, pos, {
+          includeExternalModuleExports: true,
+          includeInsertTextCompletions: true,
+          triggerCharacter: "<",
+        }) || [];
+      console.log("Completions:", completions?.entries?.length || 0);
+      const program = Service.languageService.getProgram();
+      const fileName = virtualUri?.url.fsPath;
+      const snapshot = Service.languageService.getProgram()?.getSourceFile(fileName)?.text;
+      // console.log("=== Snapshot excerpt ===");
+      // console.log(snapshot?.substring(pos - 40, pos + 40));
+      // console.log("=== Position ===", pos);
+      // const sourceFile = program?.getSourceFile(virtualUri.url.fsPath);
+      // const text = sourceFile!.getFullText();
+      // console.log("charAt(pos):", text[pos], "context snippet:", text.slice(pos - 10, pos + 10));
+      // console.log("Has sourceFile?", sourceFile?.getFullText());
       //   console.log("Providing completions for virtual file:", virtualUri?.url.fsPath);
       //   console.warn("virtualFile:", virtualFile);
       return tagCompletions;

@@ -1,6 +1,7 @@
 import * as ts from "typescript";
 import * as fs from "fs";
 import * as path from "path";
+import * as vscode from "vscode";
 import { Transforme } from "./transforme";
 
 let parsed!: ts.ParsedCommandLine;
@@ -16,7 +17,7 @@ function getParsedCommandLine(): ts.ParsedCommandLine {
 
 export namespace Service {
   //
-  const files = new Map<string, string>();
+  const files = new Map<string, { version: number; content: string }>();
 
   export const parsedConfig = getParsedCommandLine();
 
@@ -25,37 +26,44 @@ export namespace Service {
     updateFile: (fileName: string, content: string) => void;
   } = {
     getScriptFileNames: () => Array.from(new Set<string>([...parsedConfig.fileNames.map((f) => path.resolve(f)), ...files.keys()])),
-    getScriptVersion: () => "1",
+    getScriptVersion: (fileName) => files.get(fileName)?.version.toString() ?? "0",
 
     getScriptSnapshot: (fileName) => {
       if (fileName.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`)) {
-        const text = files.get(fileName);
-        return text ? ts.ScriptSnapshot.fromString(text) : undefined;
+        const content = files.get(fileName)?.content;
+        return content ? ts.ScriptSnapshot.fromString(content) : undefined;
       }
       const normalized = path.resolve(fileName);
-      const text = files.get(normalized) ?? (fs.existsSync(normalized) ? fs.readFileSync(normalized, "utf8") : undefined);
+      const text = fs.existsSync(normalized) ? fs.readFileSync(normalized, "utf8") : undefined;
       return text ? ts.ScriptSnapshot.fromString(text) : undefined;
     },
     updateFile: (fileName: string, content: string) => {
-      files.set(fileName, content);
+      const entry = files.get(fileName);
+      if (!entry) {
+        files.set(fileName, { version: 0, content });
+      } else {
+        entry.version++;
+        entry.content = content;
+      }
       languageService.cleanupSemanticCache();
     },
-    getCurrentDirectory: () => process.cwd(),
 
     getCompilationSettings: () => parsedConfig.options, // ← usa o tsconfig do projeto
 
-    getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
-
     fileExists: (fileName) => files.has(fileName) || fs.existsSync(fileName),
 
-    readFile: (fileName) => {
-      const normalized = path.resolve(fileName);
-      if (fileName.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`)) {
-        return files.get(fileName) ?? "";
-      }
-      return fs.readFileSync(normalized, "utf8");
-    },
+    // readFile: (fileName) => {
+    //   const normalized = path.resolve(fileName);
+    //   if (fileName.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`)) {
+    //     return files.get(fileName) ?? "";
+    //   }
+    //   return fs.readFileSync(normalized, "utf8");
+    // },
+    getDefaultLibFileName: ts.getDefaultLibFilePath,
+    readFile: ts.sys.readFile,
+    readDirectory: ts.sys.readDirectory,
+    getCurrentDirectory: () => process.cwd(),
   };
 
-  export const languageService = ts.createLanguageService(host, ts.createDocumentRegistry());
+  export const languageService = ts.createLanguageService(host);
 }
