@@ -4,6 +4,9 @@ import * as babelParser from "recast/parsers/babel-ts";
 import { IRange, VirtualFile } from "./utils";
 import * as fs from "fs";
 import path = require("path");
+import { URI } from "vscode-uri";
+import { documents, isDebug } from "./server";
+import { fileURLToPath } from "url";
 
 export function mapTemplateToTS(source: string): string {
   //   // Exemplo simples: converte {{ var }} → let var: any;
@@ -42,9 +45,7 @@ export namespace Transforme {
 
     // const startOffset = idx + marker.length + 1; // +1 por causa do \n logo após o marcador
     const before = virtualText.slice(0, idx + marker.length + 1 - "/*__TC_START__*//*__TC_END__*/</>);".length);
-    console.log("before:", before.length);
-    fs.writeFileSync(`/Users/Ezequiel/Documents/TypeComposer/docs/src/components/sidebar/test.text`, before, "utf8");
-    return new IRange(before.length, before.length + code.length, 0, "");
+    return new IRange(0, 0, before.length, before.length + code.length);
   }
 
   export function splitImportsAndCode(code: string): { imports: string; codeWithoutImports: string; importRange: IRange } {
@@ -53,21 +54,76 @@ export namespace Transforme {
       const imports = code.slice(0, offset);
       const codeWithoutImports = code.slice(offset);
       // const importLines = imports.split("\n");
-      const importRange = imports.length ? new IRange(0, imports.length, 0, "") : IRange.invalid();
+      const importRange = imports.length ? new IRange(0, imports.length, 0, imports.length) : IRange.invalid();
 
       return { imports, codeWithoutImports, importRange };
     } catch (err) {
-      console.error("Erro ao separar imports e código:", err);
+      console.error("Error separating imports and code:", err);
       return { imports: "", codeWithoutImports: code, importRange: IRange.invalid() };
     }
   }
 
+  /**
+   * Retorna true se o trecho (após imports) contém apenas JSX/TSX
+   * ou statements vazios. Retorna false se encontrar declarações
+   * de variáveis, funções, classes ou outros nodes que não sejam
+   * JSXExpression/JSXElement/JSXFragment/EmptyStatement.
+   */
+  function isJsxOnly(codeWithoutImports: string): boolean {
+    const okTypes = ["JSXElement", "JSXFragment", "JSXExpressionContainer"];
+
+    try {
+      const ast = recast.parse(codeWithoutImports, { parser: babelParser });
+      const body = (ast.program && ast.program.body) || [];
+
+      let seenJsx = false;
+      for (const node of body) {
+        if (node.type === "EmptyStatement") continue;
+
+        if (!seenJsx && node.type === "ImportDeclaration") continue;
+
+        if (node.type === "ExpressionStatement") {
+          const expr = (node as any).expression;
+          if (!expr) return false;
+
+          if (okTypes.includes(expr.type)) {
+            seenJsx = true;
+            continue;
+          }
+          return false;
+        }
+
+        if (node.type === "ExportDefaultDeclaration") {
+          const decl = (node as any).declaration;
+          if (decl && (decl.type === "JSXElement" || decl.type === "JSXFragment")) {
+            seenJsx = true;
+            continue;
+          }
+          return false;
+        }
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
   function analisarCode(virtualFile: VirtualFile, code: string): boolean {
+    virtualFile.isJsxOnly = isJsxOnly(virtualFile.content);
     const { codeWithoutImports, imports, importRange } = splitImportsAndCode(virtualFile.content);
+    // valida que após os imports exista apenas JSX/TSX — se houver declarações como const/let/var, retorna false
     // ✅ Parse com Recast + babel-ts (preserva comentários e formato)
     const ast = recast.parse(code, { parser: babelParser });
 
     let modified = false;
+    try {
+      const modifiedTime = fs.statSync(virtualFile.tsUrl).mtimeMs;
+      virtualFile.tsModified = modifiedTime;
+    } catch (err) {
+      virtualFile.tsModified = 0;
+    }
 
     // ✅ Caminha pelo AST usando Recast Visitor API
     recast.types.visit(ast, {
@@ -96,29 +152,42 @@ export namespace Transforme {
 
     if (!modified) return false;
 
-    const virualContent = `${imports}${recast.print(ast).code}`;
+    const virtualContent = `${imports}${recast.print(ast).code}`;
 
-    const bodyRange = getContentStartPosition(virualContent, virtualFile.content);
+    const bodyRange = getContentStartPosition(virtualContent, virtualFile.content);
+    bodyRange.startTemplate = imports.length;
+    bodyRange.endTemplate = imports.length + codeWithoutImports.length;
 
-    if (virualContent) {
-      const newContent = virualContent.replace(
+    if (virtualContent) {
+      const newContent = virtualContent.replace(
         "return (<>/*__TC_START__*//*__TC_END__*/</>);",
         `return (<>
 ${codeWithoutImports}
    </>);`
       );
-      bodyRange.startLine = bodyRange.getLineOffset(bodyRange.start, newContent).line;
-      bodyRange.line = imports.split("\n").length - 1;
       virtualFile.tsContent = code;
-      virtualFile.virualContent = newContent;
+      virtualFile.virtualContent = newContent;
       virtualFile.bodyRange = bodyRange;
       virtualFile.importRange = importRange;
     }
     return true;
   }
 
+  function debugFile(virtualFile: VirtualFile) {
+    if (!virtualFile.tsUrl) return;
+    fs.writeFileSync(`${virtualFile.tsUrl}.jsx`, virtualFile.virtualContent, "utf8");
+  }
+
   export function analisar(virtualFile: VirtualFile, templateSource: string): boolean {
     try {
+      if (virtualFile.tsUrl && fs.existsSync(virtualFile.tsUrl)) {
+        const modifiedTime = fs.statSync(virtualFile.tsUrl).mtimeMs;
+        if (virtualFile.tsModified === modifiedTime && virtualFile.isValid) {
+          return analisarCode(virtualFile, virtualFile.tsContent);
+        }
+        const code = fs.readFileSync(virtualFile.tsUrl, "utf-8");
+        return analisarCode(virtualFile, code);
+      } else virtualFile.tsUrl = "";
       const files = fs.readdirSync(virtualFile.folder);
       for (const file of files) {
         if (!file.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`) && (file.endsWith(".tsx") || file.endsWith(".ts"))) {
@@ -127,12 +196,14 @@ ${codeWithoutImports}
 
           virtualFile.isValid = analisarCode(virtualFile, code);
           if (virtualFile.isValid) {
+            virtualFile.tsUrl = filePath;
+            if (isDebug) debugFile(virtualFile);
             return true;
           }
         }
       }
     } catch (err) {
-      console.error("Erro ao ler a pasta:", err);
+      console.error("Error reading folder:", err);
     }
     return false;
   }

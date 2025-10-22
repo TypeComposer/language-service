@@ -4,7 +4,6 @@ import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } f
 
 export function activate(context: vscode.ExtensionContext) {
   const serverModule = context.asAbsolutePath(path.join("server", "out", "server.js"));
-  console.log(`Server module path: ${serverModule}`);
 
   const serverOptions: ServerOptions = {
     run: { module: serverModule, transport: TransportKind.ipc },

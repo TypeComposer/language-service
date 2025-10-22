@@ -1,42 +1,69 @@
-import { createConnection, ProposedFeatures, TextDocuments, TextDocumentSyncKind } from "vscode-languageserver/node";
+import { CodeAction, CodeActionKind, CompletionItem, CompletionItemKind, createConnection, ProposedFeatures, TextDocuments, TextDocumentSyncKind } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { tsService, updateVirtualFile } from "./tsService";
+import { TsLanguageServiceHost } from "./tsService";
+import { TAGS_HTML } from "./utils";
 
 const connection = createConnection(ProposedFeatures.all);
-const documents = new TextDocuments(TextDocument);
+export const documents = new TextDocuments(TextDocument);
+export const isDebug = process.execArgv.some((arg) => arg.includes("--inspect"));
+let tsService!: TsLanguageServiceHost;
 
-connection.onInitialize(() => ({
-  capabilities: {
-    textDocumentSync: TextDocumentSyncKind.Incremental,
-    completionProvider: { resolveProvider: false },
-    hoverProvider: true,
-  },
-}));
+connection.onInitialize((params) => {
+  console.log(isDebug ? "Language Server running in DEBUG mode" : "Language Server running in NORMAL mode");
+  const workspaceFolder = params.workspaceFolders?.[0];
+  const workspacePath: string = workspaceFolder ? new URL(workspaceFolder.uri).pathname : new URL(params?.rootUri || "").pathname;
+  tsService = new TsLanguageServiceHost(workspacePath);
+  return {
+    capabilities: {
+      textDocumentSync: TextDocumentSyncKind.Incremental,
+      completionProvider: { resolveProvider: false, triggerCharacters: [".", "<", "/", " ", '"'] },
+      definitionProvider: true,
+      hoverProvider: true,
+      codeActionProvider: {
+        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.Refactor],
+      },
+    },
+  };
+});
 
 documents.onDidOpen((e) => {
-  const diagnostics = updateVirtualFile(e.document);
+  const diagnostics = tsService.updateVirtualFile(e.document);
   connection.sendDiagnostics({ uri: e.document.uri, diagnostics });
 });
 
 documents.onDidChangeContent((change) => {
-  const diagnostics = updateVirtualFile(change.document);
+  const diagnostics = tsService.updateVirtualFile(change.document);
   connection.sendDiagnostics({ uri: change.document.uri, diagnostics });
 });
 
 connection.onCompletion((params) => {
   const document = documents.get(params.textDocument.uri);
   if (!document) return [];
-  const completions = tsService.getCompletionsTemplateAtPosition(document, params.position, {})?.entries ?? [];
-  console.log(`Completions for ${params.textDocument.uri}:`, completions.length);
-  return completions.map((entry) => ({
-    label: entry.name,
-    kind: 6, // Variable
-  }));
-  return [];
+  return tsService.getCompletionsTemplateAtPosition(document, params.position, {});
 });
 
+// @ts-ignore
 connection.onHover((params) => {
-  return null;
+  const document = documents.get(params.textDocument.uri);
+  if (!document) return null;
+  const hoverInfo = tsService.getHoverTemplateAtPosition(document, params.position);
+  return hoverInfo;
+});
+
+connection.onCodeAction((params) => {
+  const document = documents.get(params.textDocument.uri);
+  if (!document) return [];
+  const diagnosticCodes = params.context.diagnostics.map((d) => d.code as number);
+  return tsService.getCodeFixesTemplateAtPosition(document, params.range, diagnosticCodes);
+});
+
+// // Quick Fixes, Definitions, References, etc. can be added here similarly
+connection.onDefinition((params) => {
+  const document = documents.get(params.textDocument.uri);
+  if (!document) return null;
+  const definitionInfo = tsService.getDefinitionTemplateAtPosition(document, params.position);
+  console.log(`Definition for ${params.textDocument.uri}:`, definitionInfo);
+  return definitionInfo;
 });
 
 documents.listen(connection);

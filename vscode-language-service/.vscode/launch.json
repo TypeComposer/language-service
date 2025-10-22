@@ -8,6 +8,7 @@
       "name": "Launch Client",
       "runtimeExecutable": "${execPath}",
       "args": ["--extensionDevelopmentPath=${workspaceRoot}", "--disable-extensions", "--enable-proposed-api", "vscode.typescript-language-features"],
+      "env": { "EXT_MODE": "debug" },
       "outFiles": ["${workspaceRoot}/client/out/**/*.js", "${workspaceRoot}/server/out/**/*.js"],
       "autoAttachChildProcesses": true,
       "preLaunchTask": {
