@@ -77,7 +77,7 @@ export class TsLanguageServiceHost {
   getCompletionsTemplateAtPosition(document: TextDocument, position: Position, options: ts.GetCompletionsAtPositionOptions) {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
-    if (!virtualFile || !virtualFile.isValid) return [];
+    if (!virtualFile || !virtualFile.isJsxOnly) return [];
     const offset = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(position));
 
     const completions: CompletionItem[] = (this.tsService.getCompletionsAtPosition(fileName, offset, options)?.entries ?? []).map((entry) => ({
@@ -118,7 +118,7 @@ export class TsLanguageServiceHost {
   getHoverTemplateAtPosition(document: TextDocument, position: Position) {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
-    if (!virtualFile || !virtualFile.isValid) return null;
+    if (!virtualFile || !virtualFile.isJsxOnly) return null;
     const info = this.tsService.getQuickInfoAtPosition(fileName, this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(position)));
     if (!info) return null;
     const display = ts.displayPartsToString(info.displayParts);
@@ -146,7 +146,7 @@ export class TsLanguageServiceHost {
   getDefinitionTemplateAtPosition(document: TextDocument, position: Position) {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
-    if (!virtualFile || !virtualFile.isValid) return null;
+    if (!virtualFile || !virtualFile.isJsxOnly) return null;
     const offset = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(position));
     const defs = this.tsService.getDefinitionAtPosition(fileName, offset) as ts.DefinitionInfo[];
 
@@ -173,7 +173,7 @@ export class TsLanguageServiceHost {
   getDiagnosticsTemplate(document: TextDocument): Diagnostic[] {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
-    if (!virtualFile || !virtualFile.isValid) return [];
+    if (!virtualFile || !virtualFile.isJsxOnly) return [];
     const diagnostics = this.tsService.getSemanticDiagnostics(fileName).concat(this.tsService.getSyntacticDiagnostics(fileName));
     return diagnostics
       .filter((diag) => {
@@ -203,7 +203,7 @@ export class TsLanguageServiceHost {
   getCodeFixesTemplateAtPosition(document: TextDocument, range: Range, errorCodes: readonly number[]): CodeAction[] {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
-    if (!virtualFile || !virtualFile.isValid) return [];
+    if (!virtualFile || !virtualFile.isJsxOnly) return [];
     const start = virtualFile.bodyRange.startVirtual + document.offsetAt(range.start);
     const end = virtualFile.bodyRange.endVirtual + document.offsetAt(range.end);
     const fixes = this.tsService.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {});
@@ -249,7 +249,6 @@ export class TsLanguageServiceHost {
       className,
       importRange: IRange.invalid(),
       bodyRange: IRange.invalid(),
-      isValid: true,
       folder: path.dirname(fileURLToPath(document.uri)),
       document,
       isJsxOnly: false,
@@ -259,21 +258,23 @@ export class TsLanguageServiceHost {
     Transforme.analisar(virtualFile, templateSource);
     this.files.set(fileName, virtualFile);
     const diagnostics = this.getDiagnosticsTemplate(document);
-    if (!virtualFile.isJsxOnly && templateSource.trim().length > 0) {
+    if (!virtualFile.isJsxOnly) {
       const lines = templateSource.split("\n");
       const start = { line: 0, character: 0 };
       const end = { line: lines.length - 1, character: lines[lines.length - 1]?.length || 0 };
-      diagnostics.push({
-        severity: 1,
-        range: {
-          start,
-          end,
-        },
-        code: 9999,
+      return [
+        {
+          severity: 1,
+          range: {
+            start,
+            end,
+          },
+          code: 9999,
 
-        message: `The file contains non-JSX/TSX code after imports. Only JSX/TSX code is allowed in .template files. Example: wrap multiple root elements or siblings in a fragment like <>...</> (e.g. <>\n  <div/>\n  <div/>\n</>).`,
-        source: "TypeComposer",
-      });
+          message: `The file contains non-JSX/TSX code after imports. Only JSX/TSX code is allowed in .template files. Example: wrap multiple root elements or siblings in a fragment like <>...</> (e.g. <>\n  <div/>\n  <div/>\n</>).`,
+          source: "TypeComposer",
+        },
+      ];
     }
     return diagnostics;
   }

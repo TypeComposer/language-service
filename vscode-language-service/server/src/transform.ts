@@ -7,6 +7,7 @@ import path = require("path");
 import { URI } from "vscode-uri";
 import { documents, isDebug } from "./server";
 import { fileURLToPath } from "url";
+import * as babelParserBase from "@babel/parser";
 
 export function mapTemplateToTS(source: string): string {
   //   // Exemplo simples: converte {{ var }} → let var: any;
@@ -69,52 +70,67 @@ export namespace Transforme {
    * de variáveis, funções, classes ou outros nodes que não sejam
    * JSXExpression/JSXElement/JSXFragment/EmptyStatement.
    */
-  function isJsxOnly(codeWithoutImports: string): boolean {
-    const okTypes = ["JSXElement", "JSXFragment", "JSXExpressionContainer"];
+  function isJsxOnly(code: string): boolean {
+    if (code.trim() === "") return true;
 
-    try {
-      const ast = recast.parse(codeWithoutImports, { parser: babelParser });
-      const body = (ast.program && ast.program.body) || [];
-
-      let seenJsx = false;
-      for (const node of body) {
-        if (node.type === "EmptyStatement") continue;
-
-        if (!seenJsx && node.type === "ImportDeclaration") continue;
-
-        if (node.type === "ExpressionStatement") {
-          const expr = (node as any).expression;
-          if (!expr) return false;
-
-          if (okTypes.includes(expr.type)) {
-            seenJsx = true;
-            continue;
-          }
-          return false;
-        }
-
-        if (node.type === "ExportDefaultDeclaration") {
-          const decl = (node as any).declaration;
-          if (decl && (decl.type === "JSXElement" || decl.type === "JSXFragment")) {
-            seenJsx = true;
-            continue;
-          }
-          return false;
-        }
-        return false;
-      }
-
-      return true;
-    } catch (err) {
-      return false;
+    // 1️⃣ Extrair imports
+    const importRegex = /^(import\s.+?;)/gm;
+    let lastImportIndex = 0;
+    let match;
+    while ((match = importRegex.exec(code)) !== null) {
+      lastImportIndex = match.index + match[0].length;
     }
+
+    let rest = code.slice(lastImportIndex).trim();
+    if (!rest.startsWith("<")) return false;
+
+    // 2️⃣ Detectar tag raiz
+    const tagMatch = rest.match(/^<([A-Za-z][\w]*)|^<>/);
+    if (!tagMatch) return false;
+
+    const isFragment = tagMatch[0] === "<>";
+    const tagName = isFragment ? "" : tagMatch[1];
+
+    // 3️⃣ Contagem de abertura e fechamento
+    let stack: string[] = [];
+    let i = 0;
+    const regexOpenClose = /<\/?([A-Za-z][\w]*)>|<>|<\/>/g;
+    let m: RegExpExecArray | null;
+
+    while ((m = regexOpenClose.exec(rest)) !== null) {
+      const tag = m[0];
+      const name = m[1];
+
+      if (tag === "<>" && isFragment) {
+        stack.push("<>");
+      } else if (tag === "</>" && isFragment) {
+        stack.pop();
+        if (stack.length === 0) {
+          i = regexOpenClose.lastIndex;
+          break;
+        }
+      } else if (!isFragment && name === tagName) {
+        if (tag.startsWith("</")) {
+          stack.pop();
+          if (stack.length === 0) {
+            i = regexOpenClose.lastIndex;
+            break;
+          }
+        } else {
+          stack.push(name);
+        }
+      }
+    }
+
+    const afterRoot = rest.slice(i).trim();
+
+    // 4️⃣ Retorna false se tiver código fora da raiz
+    return afterRoot === "";
   }
 
   function analisarCode(virtualFile: VirtualFile, code: string): boolean {
     virtualFile.isJsxOnly = isJsxOnly(virtualFile.content);
     const { codeWithoutImports, imports, importRange } = splitImportsAndCode(virtualFile.content);
-    // valida que após os imports exista apenas JSX/TSX — se houver declarações como const/let/var, retorna false
-    // ✅ Parse com Recast + babel-ts (preserva comentários e formato)
     const ast = recast.parse(code, { parser: babelParser });
 
     let modified = false;
@@ -125,7 +141,6 @@ export namespace Transforme {
       virtualFile.tsModified = 0;
     }
 
-    // ✅ Caminha pelo AST usando Recast Visitor API
     recast.types.visit(ast, {
       visitClassDeclaration(path) {
         const node = path.node;
@@ -134,17 +149,15 @@ export namespace Transforme {
           let templateMethod = node.body.body.find((m) => t.isClassMethod(m) && t.isIdentifier(m.key) && m.key.name === "template") as t.ClassMethod | undefined;
 
           if (templateMethod) {
-            // já existe → sobrescreve o corpo
             templateMethod.body = t.blockStatement([buildTemplateReturn()]);
           } else {
-            // não existe → cria
             templateMethod = t.classMethod("method", t.identifier("template"), [], t.blockStatement([buildTemplateReturn()]));
             // @ts-ignore
             node.body.body.push(templateMethod);
           }
 
           modified = true;
-          return false; // para a visita
+          return false;
         }
         this.traverse(path);
       },
@@ -173,16 +186,17 @@ ${codeWithoutImports}
     return true;
   }
 
-  function debugFile(virtualFile: VirtualFile) {
-    if (!virtualFile.tsUrl) return;
-    fs.writeFileSync(`${virtualFile.tsUrl}.jsx`, virtualFile.virtualContent, "utf8");
-  }
+  // function debugFile(virtualFile: VirtualFile) {
+  //   if (!virtualFile.tsUrl) return;
+  //   // console.log(`Debug: ${virtualFile.tsUrl}`, { virtualContent: virtualFile.virtualContent });
+  //   // fs.writeFileSync(`${virtualFile.tsUrl}.jsx`, virtualFile.virtualContent, "utf8");
+  // }
 
   export function analisar(virtualFile: VirtualFile, templateSource: string): boolean {
     try {
       if (virtualFile.tsUrl && fs.existsSync(virtualFile.tsUrl)) {
         const modifiedTime = fs.statSync(virtualFile.tsUrl).mtimeMs;
-        if (virtualFile.tsModified === modifiedTime && virtualFile.isValid) {
+        if (virtualFile.tsModified === modifiedTime) {
           return analisarCode(virtualFile, virtualFile.tsContent);
         }
         const code = fs.readFileSync(virtualFile.tsUrl, "utf-8");
@@ -194,10 +208,10 @@ ${codeWithoutImports}
           const filePath = path.join(virtualFile.folder, file);
           const code = fs.readFileSync(filePath, "utf-8");
 
-          virtualFile.isValid = analisarCode(virtualFile, code);
-          if (virtualFile.isValid) {
+          const isValid = analisarCode(virtualFile, code);
+          if (isValid) {
             virtualFile.tsUrl = filePath;
-            if (isDebug) debugFile(virtualFile);
+            // if (isDebug) debugFile(virtualFile);
             return true;
           }
         }

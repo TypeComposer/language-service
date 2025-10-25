@@ -61,7 +61,6 @@ export interface VirtualFile {
   bodyRange: IRange;
   importRange: IRange;
   className: string;
-  isValid: boolean;
   document: TextDocument;
   version: number;
   isJsxOnly: boolean;
