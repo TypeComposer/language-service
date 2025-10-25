@@ -1,4 +1,4 @@
-import { CodeAction, CodeActionKind, CompletionItem, CompletionItemKind, createConnection, ProposedFeatures, TextDocuments, TextDocumentSyncKind } from "vscode-languageserver/node";
+import { CodeAction, CodeActionKind, CompletionItem, CompletionItemKind, createConnection, FileChangeType, ProposedFeatures, TextDocuments, TextDocumentSyncKind } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { TsLanguageServiceHost } from "./tsService";
 import { TAGS_HTML } from "./utils";
@@ -36,6 +36,16 @@ documents.onDidChangeContent((change) => {
   connection.sendDiagnostics({ uri: change.document.uri, diagnostics });
 });
 
+connection.onDidChangeWatchedFiles((params) => {
+  for (const change of params.changes) {
+    if (!change.uri.endsWith(".template")) continue;
+    if (change.type === FileChangeType.Deleted) {
+      tsService.deleteVirtualFile(change.uri);
+      connection.sendDiagnostics({ uri: change.uri, diagnostics: [] });
+    }
+  }
+});
+
 connection.onCompletion((params) => {
   const document = documents.get(params.textDocument.uri);
   if (!document) return [];
@@ -62,7 +72,6 @@ connection.onDefinition((params) => {
   const document = documents.get(params.textDocument.uri);
   if (!document) return null;
   const definitionInfo = tsService.getDefinitionTemplateAtPosition(document, params.position);
-  console.log(`Definition for ${params.textDocument.uri}:`, definitionInfo);
   return definitionInfo;
 });
 

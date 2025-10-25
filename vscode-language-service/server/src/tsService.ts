@@ -18,7 +18,7 @@ export class TsLanguageServiceHost {
   parsedConfig: ts.ParsedCommandLine;
   host: ts.LanguageServiceHost;
   tsService!: ts.LanguageService;
-  files = new Map<string, VirtualFile>();
+  private files = new Map<string, VirtualFile>();
 
   constructor(workspacePath: string) {
     this.parsedConfig = this.loadTsConfig(workspacePath)!;
@@ -226,6 +226,11 @@ export class TsLanguageServiceHost {
       },
     }));
     return actions;
+  }
+
+  deleteVirtualFile(uri: string) {
+    const fileName = normalizeFileName(uri);
+    this.files.delete(fileName);
   }
 
   updateVirtualFile(document: TextDocument): Diagnostic[] {
