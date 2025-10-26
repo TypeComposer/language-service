@@ -150,4 +150,18 @@ ${codeWithoutImports}
     }
     return false;
   }
+
+  export function margeImport(importTemplate: string, importFix: string): string {
+    const importLines = importTemplate
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("import "));
+    const fixLines = importFix
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("import "));
+
+    const allImports = Array.from(new Set([...importLines, ...fixLines]));
+    return allImports.join("\n") + "\n";
+  }
 }

@@ -207,14 +207,44 @@ export class TsLanguageServiceHost {
       });
   }
 
+  normalizeImportToTemplate(virtualFile: VirtualFile, fixe: ts.CodeFixAction): ts.CodeFixAction {
+    if (!fixe.description.startsWith("Update import")) return fixe;
+    // const importTemplate = virtualFile.content.substring(0, virtualFile.importRange.endTemplate);
+    const importVirtual = fixe.description.match(/from ['"](.*)['"]/);
+    const importModule = importVirtual ? importVirtual[1] : null;
+    const newImport = (name: string) => `import { ${name} } ${importVirtual ? importVirtual[0] : ""};\n`;
+    for (const change of fixe.changes) {
+      for (const textChange of change.textChanges) {
+        const importName = textChange.newText.replace(",", "").trim();
+        if (importName) {
+          const updatedImport = newImport(importName);
+          console.log(" importNameMatch:", importName, "updatedImport", updatedImport, " importModule:", importModule);
+          textChange.newText = updatedImport;
+        }
+      }
+    }
+    console.log("fixe:", fixe);
+
+    return fixe;
+  }
+
   getCodeFixesTemplateAtPosition(document: TextDocument, range: Range, errorCodes: readonly number[]): CodeAction[] {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
     if (!virtualFile || !virtualFile.isJsxOnly) return [];
     const start = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(range.start));
     const end = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(range.end));
-    const fixes = this.tsService.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {});
-
+    const fixes = this.tsService.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {}).map((fix) => {
+      for (const change of fix.changes) {
+        for (const textChange of change.textChanges) {
+          textChange.span.start = this.normalizeVirtualFileToTemplatePosition(virtualFile, textChange.span.start);
+        }
+      }
+      if (fix.fixName == "import") {
+        this.normalizeImportToTemplate(virtualFile, fix);
+      }
+      return fix;
+    });
     const actions: CodeAction[] = fixes.map((fix) => ({
       title: fix.description,
       kind: CodeActionKind.QuickFix,

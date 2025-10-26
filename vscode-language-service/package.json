@@ -3,7 +3,7 @@
   "description": "A language support extension for TypeComposer",
   "author": "zico15",
   "license": "MIT",
-  "version": "0.0.23",
+  "version": "0.0.24",
   "repository": {
     "type": "git",
     "url": "https://github.com/TypeComposer/language-service/tree/main/vscode-language-service"
