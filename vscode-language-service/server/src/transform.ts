@@ -4,32 +4,10 @@ import * as babelParser from "recast/parsers/babel-ts";
 import { IRange, VirtualFile } from "./utils";
 import * as fs from "fs";
 import path = require("path");
-import { URI } from "vscode-uri";
-import { documents, isDebug } from "./server";
-import { fileURLToPath } from "url";
-import * as babelParserBase from "@babel/parser";
-
-export function mapTemplateToTS(source: string): string {
-  //   // Exemplo simples: converte {{ var }} → let var: any;
-  //   const matches = [...source.matchAll(/\{\{\s*(\w+)\s*\}\}/g)];
-  //   const declarations = matches.map(([, name]) => `let ${name}: any;`).join("\n");
-
-  //   return `
-  // ${declarations}
-  // // --- Template content (ignored by TS) ---
-  // /*
-  // ${source.replace(/\*\//g, "* /")}
-  // */
-  // `;
-  return source;
-}
+import { isDebug } from "./server";
 
 export namespace Transforme {
   export const EXTENSION_VIRTUAL = "tc.template.virtual.tsx";
-
-  // Analisa todos os arquivos .tsx e .ts de uma pasta
-  // Se já existir o método template() na classe alvo, substitui o conteúdo
-  // Se não existir, cria o método template()
 
   function buildTemplateReturn() {
     return t.returnStatement(t.parenthesizedExpression(t.jsxFragment(t.jsxOpeningFragment(), t.jsxClosingFragment(), [t.jsxText("/*__TC_START__*/"), t.jsxText("/*__TC_END__*/")])));
@@ -73,59 +51,10 @@ export namespace Transforme {
   function isJsxOnly(code: string): boolean {
     if (code.trim() === "") return true;
 
-    // 1️⃣ Extrair imports
-    const importRegex = /^(import\s.+?;)/gm;
-    let lastImportIndex = 0;
-    let match;
-    while ((match = importRegex.exec(code)) !== null) {
-      lastImportIndex = match.index + match[0].length;
-    }
-
-    let rest = code.slice(lastImportIndex).trim();
-    if (!rest.startsWith("<")) return false;
-
-    // 2️⃣ Detectar tag raiz
-    const tagMatch = rest.match(/^<([A-Za-z][\w]*)|^<>/);
-    if (!tagMatch) return false;
-
-    const isFragment = tagMatch[0] === "<>";
-    const tagName = isFragment ? "" : tagMatch[1];
-
-    // 3️⃣ Contagem de abertura e fechamento
-    let stack: string[] = [];
-    let i = 0;
-    const regexOpenClose = /<\/?([A-Za-z][\w]*)>|<>|<\/>/g;
-    let m: RegExpExecArray | null;
-
-    while ((m = regexOpenClose.exec(rest)) !== null) {
-      const tag = m[0];
-      const name = m[1];
-
-      if (tag === "<>" && isFragment) {
-        stack.push("<>");
-      } else if (tag === "</>" && isFragment) {
-        stack.pop();
-        if (stack.length === 0) {
-          i = regexOpenClose.lastIndex;
-          break;
-        }
-      } else if (!isFragment && name === tagName) {
-        if (tag.startsWith("</")) {
-          stack.pop();
-          if (stack.length === 0) {
-            i = regexOpenClose.lastIndex;
-            break;
-          }
-        } else {
-          stack.push(name);
-        }
-      }
-    }
-
-    const afterRoot = rest.slice(i).trim();
-
-    // 4️⃣ Retorna false se tiver código fora da raiz
-    return afterRoot === "";
+    const importRegex = /^import\s.+?;$/gm;
+    code = code.replace(importRegex, "").trim();
+    if (code && (!code.startsWith("<") || !code.endsWith(">"))) return false;
+    return true;
   }
 
   function analisarCode(virtualFile: VirtualFile, code: string): boolean {
@@ -186,11 +115,11 @@ ${codeWithoutImports}
     return true;
   }
 
-  // function debugFile(virtualFile: VirtualFile) {
-  //   if (!virtualFile.tsUrl) return;
-  //   // console.log(`Debug: ${virtualFile.tsUrl}`, { virtualContent: virtualFile.virtualContent });
-  //   // fs.writeFileSync(`${virtualFile.tsUrl}.jsx`, virtualFile.virtualContent, "utf8");
-  // }
+  function debugFile(virtualFile: VirtualFile) {
+    if (!virtualFile.tsUrl) return;
+    // console.log(`Debug: ${virtualFile.tsUrl}`, { virtualContent: virtualFile.virtualContent });
+    fs.writeFileSync(`${virtualFile.tsUrl}.jsx`, virtualFile.virtualContent, "utf8");
+  }
 
   export function analisar(virtualFile: VirtualFile, templateSource: string): boolean {
     try {
@@ -211,7 +140,7 @@ ${codeWithoutImports}
           const isValid = analisarCode(virtualFile, code);
           if (isValid) {
             virtualFile.tsUrl = filePath;
-            // if (isDebug) debugFile(virtualFile);
+            if (isDebug) debugFile(virtualFile);
             return true;
           }
         }

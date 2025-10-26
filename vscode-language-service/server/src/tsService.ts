@@ -11,7 +11,12 @@ import { documents } from "./server";
 export const EXTENSION_VIRTUAL = "tc.template.virtual.tsx";
 
 function normalizeFileName(uri: string): string {
-  return uri.replace(/\.template$/, `.tc.template.virtual.tsx`);
+  try {
+    const fsPath = uri.startsWith("file://") ? fileURLToPath(uri) : uri;
+    return fsPath.replace(/\.template$/, `.tc.template.virtual.tsx`);
+  } catch (err) {
+    return uri.replace(/\.template$/, `.tc.template.virtual.tsx`);
+  }
 }
 
 export class TsLanguageServiceHost {
@@ -19,29 +24,27 @@ export class TsLanguageServiceHost {
   host: ts.LanguageServiceHost;
   tsService!: ts.LanguageService;
   private files = new Map<string, VirtualFile>();
+  private workspaceRoot: string;
 
   constructor(workspacePath: string) {
+    this.workspaceRoot = workspacePath;
     this.parsedConfig = this.loadTsConfig(workspacePath)!;
     this.host = this.createHost();
   }
 
   loadTsConfig(workspacePath: string) {
     const configPath = ts.findConfigFile(workspacePath, ts.sys.fileExists, "tsconfig.json");
-
-    if (!configPath) {
-      return null;
-    }
+    if (!configPath) return null;
 
     const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
-
-    if (configFile.error) {
-      const message = ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n");
-      console.error("Error: tsconfig.json:", message);
-      return null;
-    }
+    if (configFile.error) return null;
 
     const configDir = path.dirname(configPath);
     const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, configDir);
+
+    parsed.options.baseUrl = configDir;
+    parsed.options.pathsBasePath = parsed.options.baseUrl;
+    this.workspaceRoot = configDir;
     return parsed;
   }
 
@@ -65,7 +68,7 @@ export class TsLanguageServiceHost {
       getDefaultLibFileName: ts.getDefaultLibFilePath,
       readFile: ts.sys.readFile,
       readDirectory: ts.sys.readDirectory,
-      getCurrentDirectory: () => process.cwd(),
+      getCurrentDirectory: () => this.workspaceRoot,
     };
 
     // @ts-ignore
@@ -79,10 +82,16 @@ export class TsLanguageServiceHost {
     const virtualFile = this.files.get(fileName);
     if (!virtualFile || !virtualFile.isJsxOnly) return [];
     const offset = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(position));
+    const tsOptions: ts.GetCompletionsAtPositionOptions = {
+      includeExternalModuleExports: true,
+      includeInsertTextCompletions: true,
 
-    const completions: CompletionItem[] = (this.tsService.getCompletionsAtPosition(fileName, offset, options)?.entries ?? []).map((entry) => ({
+      ...(options || {}),
+    };
+
+    const completions: CompletionItem[] = (this.tsService.getCompletionsAtPosition(fileName, offset, tsOptions)?.entries ?? []).map((entry) => ({
       label: entry.name,
-      kind: 6, // Variable
+      kind: 6,
     }));
     const textBefore = document.getText().slice(0, document.offsetAt(position));
     const lastChar = textBefore.slice(-1);
@@ -183,10 +192,8 @@ export class TsLanguageServiceHost {
       .map((diag) => {
         const start = diag.start ?? 0;
         const length = diag.length ?? 0;
-        const range: IRange = (virtualFile.bodyRange.isInsideVirtual(start) ? virtualFile.bodyRange : virtualFile.importRange).clone();
-        const offset = virtualFile.bodyRange.isInsideVirtual(start) && virtualFile.importRange.endVirtual != -1 ? virtualFile.importRange.endVirtual : 0;
-        const startPos = document.positionAt(start - range.startVirtual + offset);
-        const endPos = document.positionAt(start + length - range.startVirtual + offset);
+        const startPos = document.positionAt(this.normalizeVirtualFileToTemplatePosition(virtualFile, start));
+        const endPos = document.positionAt(this.normalizeVirtualFileToTemplatePosition(virtualFile, start + length));
         return {
           severity: 1,
           range: {
@@ -204,8 +211,8 @@ export class TsLanguageServiceHost {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
     if (!virtualFile || !virtualFile.isJsxOnly) return [];
-    const start = virtualFile.bodyRange.startVirtual + document.offsetAt(range.start);
-    const end = virtualFile.bodyRange.endVirtual + document.offsetAt(range.end);
+    const start = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(range.start));
+    const end = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(range.end));
     const fixes = this.tsService.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {});
 
     const actions: CodeAction[] = fixes.map((fix) => ({
