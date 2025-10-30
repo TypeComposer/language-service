@@ -18,7 +18,24 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   const client = new LanguageClient("TypeComposerTemplate", "TypeComposer Template Language Server", serverOptions, clientOptions);
-  client.start();
+  context.subscriptions.push(client);
+
+  let isReady = false;
+  const startPromise = client.start();
+  startPromise.then(() => {
+    isReady = true;
+    const active = vscode.window.activeTextEditor;
+    if (active && active.document.languageId === "tsx-template") {
+      client.sendNotification("typecomposer/documentFocus", { uri: active.document.uri.toString() });
+    }
+  });
+
+  const disposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
+    if (!isReady) return;
+    if (!editor || editor.document.languageId !== "tsx-template") return;
+    client.sendNotification("typecomposer/documentFocus", { uri: editor.document.uri.toString() });
+  });
+  context.subscriptions.push(disposable);
 }
 
 export function deactivate() {}

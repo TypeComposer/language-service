@@ -6,6 +6,20 @@ import * as fs from "fs";
 import path = require("path");
 import { isDebug } from "./server";
 
+interface ImportInfo {
+  module: string;
+  text: string;
+  start: number;
+  end: number;
+  newText: string;
+  startInsert: number;
+  imports: string[];
+}
+
+export interface TemplateImport {
+  module: string;
+  import: string;
+}
 export namespace Transforme {
   export const EXTENSION_VIRTUAL = "tc.template.virtual.tsx";
 
@@ -151,17 +165,99 @@ ${codeWithoutImports}
     return false;
   }
 
-  export function margeImport(importTemplate: string, importFix: string): string {
-    const importLines = importTemplate
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith("import "));
-    const fixLines = importFix
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith("import "));
+  // export function margeImport(importTemplate: string, importFix: string): string {
+  //   const importLines = importTemplate
+  //     .split("\n")
+  //     .map((l) => l.trim())
+  //     .filter((l) => l.startsWith("import "));
+  //   const fixLines = importFix
+  //     .split("\n")
+  //     .map((l) => l.trim())
+  //     .filter((l) => l.startsWith("import "));
 
-    const allImports = Array.from(new Set([...importLines, ...fixLines]));
-    return allImports.join("\n") + "\n";
+  //   const allImports = Array.from(new Set([...importLines, ...fixLines]));
+  //   return allImports.join("\n") + "\n";
+  // }
+
+  function infoImports(code: string): ImportInfo[] {
+    const regex = /import\s+(?:\{([^}]+)\}|\*\s+as\s+([^\s]+)|([^\s'"]+))?\s*(?:from\s+)?['"]([^'"]+)['"]\s*;?/g;
+
+    const result: ImportInfo[] = [];
+
+    for (const match of code.matchAll(regex)) {
+      const [fullMatch, namedImports, namespaceImport, defaultImport, moduleName] = match;
+      const index = match.index ?? 0;
+
+      let imports: string[] = [];
+
+      if (namedImports) {
+        imports = namedImports
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      } else if (namespaceImport) {
+        imports = [`* as ${namespaceImport}`];
+      } else if (defaultImport) {
+        imports = [defaultImport];
+      }
+      result.push({
+        module: moduleName,
+        text: fullMatch.trim(),
+        startInsert: 0,
+        imports,
+        newText: "",
+        start: index,
+        end: index + fullMatch.trim().length,
+      });
+    }
+
+    return result;
+  }
+
+  export function margeImportTemplate(
+    template: TemplateImport,
+    code: string
+  ): {
+    action: "added" | "merged";
+    start: number;
+    newText: string;
+  } {
+    const info: ImportInfo[] = infoImports(code);
+    const index = info.findIndex((imp) => imp.imports.length > 0 && imp.module === template.module);
+    let imp: ImportInfo | null = null;
+    if (index !== -1) {
+      const existing = info[index];
+      existing.text = `import { ${[...new Set([...existing.imports, ...template.import.split(",")])].join(", ")} } from '${template.module}';`;
+      existing.imports = [...new Set([...existing.imports, ...template.import.split(",")])];
+      existing.newText = `, ${template.import}`;
+      existing.startInsert = existing.start + existing.text.indexOf(existing.newText);
+      imp = existing;
+    } else {
+      const text = `import { ${template.import} } from '${template.module}';\n`;
+      const lastImport = info.length ? info[info.length - 1] : null;
+      const start = lastImport ? lastImport.end + 1 : 0;
+      imp = {
+        module: template.module,
+        text,
+        startInsert: 0,
+        start,
+        newText: text,
+        end: start + text.length,
+        imports: template.import.split(",").map((s) => s.trim()),
+      };
+    }
+    if (imp) {
+      code = code.slice(0, imp.start) + imp.text + code.slice(imp.end);
+    }
+    return {
+      action: index === -1 ? "added" : "merged",
+      start: imp.startInsert,
+      newText: imp.newText,
+    };
   }
 }
+
+// 59
+// import { HomePage } from "@/pages/Home";
+// import { H1Element, H2Element } from "typecomposer";
+// import { TestTsx } from "@/router/tes";

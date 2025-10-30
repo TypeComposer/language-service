@@ -36,6 +36,13 @@ documents.onDidChangeContent((change) => {
   connection.sendDiagnostics({ uri: change.document.uri, diagnostics });
 });
 
+connection.onNotification("typecomposer/documentFocus", (params: { uri: string }) => {
+  const document = documents.get(params.uri);
+  if (!document) return;
+  const diagnostics = tsService.updateVirtualFile(document);
+  connection.sendDiagnostics({ uri: params.uri, diagnostics });
+});
+
 connection.onDidChangeWatchedFiles((params) => {
   for (const change of params.changes) {
     if (!change.uri.endsWith(".template")) continue;

@@ -1,10 +1,10 @@
 import * as ts from "typescript";
 import * as fs from "fs";
 import { fileURLToPath, pathToFileURL } from "url";
-import { Transforme } from "./transform";
+import { TemplateImport, Transforme } from "./transform";
 import path = require("path");
-import { TextDocument, Range } from "vscode-languageserver-textdocument";
-import { CodeAction, CodeActionKind, CompletionItem, CompletionItemKind, Diagnostic, InsertTextFormat, Location, Position } from "vscode-languageserver";
+import { TextDocument } from "vscode-languageserver-textdocument";
+import { CodeAction, CodeActionKind, CompletionItem, CompletionItemKind, Diagnostic, InsertTextFormat, Location, Position, Range } from "vscode-languageserver";
 import { IRange, TAGS_HTML, VirtualFile } from "./utils";
 import { documents } from "./server";
 
@@ -208,23 +208,30 @@ export class TsLanguageServiceHost {
   }
 
   normalizeImportToTemplate(virtualFile: VirtualFile, fixe: ts.CodeFixAction): ts.CodeFixAction {
+    if (fixe.changes[0]?.textChanges[0]?.span) {
+      fixe.changes[0].textChanges[0].span.start = 0;
+    }
     if (!fixe.description.startsWith("Update import")) return fixe;
-    // const importTemplate = virtualFile.content.substring(0, virtualFile.importRange.endTemplate);
     const importVirtual = fixe.description.match(/from ['"](.*)['"]/);
     const importModule = importVirtual ? importVirtual[1] : null;
-    const newImport = (name: string) => `import { ${name} } ${importVirtual ? importVirtual[0] : ""};\n`;
+    const info: TemplateImport = {
+      module: importModule || "",
+      import: "",
+    };
     for (const change of fixe.changes) {
       for (const textChange of change.textChanges) {
         const importName = textChange.newText.replace(",", "").trim();
         if (importName) {
-          const updatedImport = newImport(importName);
-          console.log(" importNameMatch:", importName, "updatedImport", updatedImport, " importModule:", importModule);
-          textChange.newText = updatedImport;
+          info.import = importName;
+          const content = virtualFile.importRange.startTemplate != -1 ? virtualFile.content.slice(virtualFile.importRange.startTemplate, virtualFile.importRange.endTemplate) : "";
+          const marge = Transforme.margeImportTemplate(info, content);
+          textChange.span.start = marge.start;
+          textChange.span.length = marge.action === "merged" ? textChange.newText.length : 0;
+          textChange.newText = marge.newText;
+          return fixe;
         }
       }
     }
-    console.log("fixe:", fixe);
-
     return fixe;
   }
 
@@ -234,34 +241,43 @@ export class TsLanguageServiceHost {
     if (!virtualFile || !virtualFile.isJsxOnly) return [];
     const start = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(range.start));
     const end = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(range.end));
-    const fixes = this.tsService.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {}).map((fix) => {
-      for (const change of fix.changes) {
-        for (const textChange of change.textChanges) {
-          textChange.span.start = this.normalizeVirtualFileToTemplatePosition(virtualFile, textChange.span.start);
-        }
-      }
+    const fixes = this.tsService.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {});
+    const actions: CodeAction[] = fixes.map((fix) => {
       if (fix.fixName == "import") {
         this.normalizeImportToTemplate(virtualFile, fix);
+      } else {
+        for (const change of fix.changes) {
+          for (const textChange of change.textChanges) {
+            textChange.span.start = this.normalizeVirtualFileToTemplatePosition(virtualFile, textChange.span.start);
+          }
+        }
       }
-      return fix;
-    });
-    const actions: CodeAction[] = fixes.map((fix) => ({
-      title: fix.description,
-      kind: CodeActionKind.QuickFix,
-      edit: {
-        changes: {
-          [document.uri]: fix.changes.flatMap((c) =>
-            c.textChanges.map((tc) => ({
-              range: {
-                start: { line: 0, character: 0 },
-                end: { line: 0 + tc.span.length, character: 0 },
-              },
-              newText: tc.newText,
-            }))
-          ),
+
+      const range: Range = fix.changes[0]?.textChanges[0]
+        ? {
+            start: document.positionAt(fix.changes[0].textChanges[0].span.start),
+            end: document.positionAt(fix.changes[0].textChanges[0].span.start),
+          }
+        : {
+            start: { line: 0, character: 0 },
+            end: { line: 0, character: 0 },
+          };
+
+      return {
+        title: fix.description,
+        kind: CodeActionKind.QuickFix,
+        edit: {
+          changes: {
+            [document.uri]: fix.changes.flatMap((c) =>
+              c.textChanges.map((tc) => ({
+                range: range!,
+                newText: tc.newText,
+              }))
+            ),
+          },
         },
-      },
-    }));
+      };
+    });
     return actions;
   }
 
