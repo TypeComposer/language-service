@@ -7,6 +7,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import { CodeAction, CodeActionKind, CompletionItem, CompletionItemKind, Diagnostic, InsertTextFormat, Location, Position, Range } from "vscode-languageserver";
 import { IRange, TAGS_HTML, VirtualFile } from "./utils";
 import { documents } from "./server";
+import { glob } from "glob";
 
 export const EXTENSION_VIRTUAL = "tc.template.virtual.tsx";
 
@@ -30,6 +31,7 @@ export class TsLanguageServiceHost {
     this.workspaceRoot = workspacePath;
     this.parsedConfig = this.loadTsConfig(workspacePath)!;
     this.host = this.createHost();
+    this.loadModules(workspacePath);
   }
 
   loadTsConfig(workspacePath: string) {
@@ -40,17 +42,35 @@ export class TsLanguageServiceHost {
     if (configFile.error) return null;
 
     const configDir = path.dirname(configPath);
-    const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, configDir);
+    const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, configDir, undefined, configPath);
 
     parsed.options.baseUrl = configDir;
     parsed.options.pathsBasePath = parsed.options.baseUrl;
     this.workspaceRoot = configDir;
+    // console.log(`Loaded tsconfig from ${configPath}`);
+    // console.log(`Compiler options:`, parsed.options);
     return parsed;
+  }
+
+  loadModules(workspacePath: string) {
+    const nodeModulesPath = path.join(workspacePath, "node_modules");
+    const rootFileNames = new Set<string>(this.parsedConfig.fileNames);
+    const typings = glob.sync("**/*.d.ts", {
+      cwd: nodeModulesPath,
+      absolute: true,
+      ignore: ["**/node_modules/**", "**/test/**", "**/tests/**"],
+    });
+
+    for (const file of typings) {
+      rootFileNames.add(file);
+    }
+    this.parsedConfig.fileNames = Array.from(rootFileNames);
+    // console.log(`Root file names:`, this.parsedConfig.fileNames);
   }
 
   createHost(): ts.LanguageServiceHost {
     const host: ts.LanguageServiceHost = {
-      getScriptFileNames: () => Array.from(new Set<string>([...this.parsedConfig.fileNames.map((f) => path.resolve(f)), ...this.files.keys()])),
+      getScriptFileNames: () => this.parsedConfig.fileNames,
       getScriptVersion: (fileName) => this.files.get(fileName)?.version.toString() ?? "0",
 
       getScriptSnapshot: (fileName) => {
@@ -228,7 +248,7 @@ export class TsLanguageServiceHost {
           textChange.span.start = marge.start;
           textChange.span.length = marge.action === "merged" ? textChange.newText.length : 0;
           textChange.newText = marge.newText;
-          return fixe;
+          fixe.description = marge.action === "added" ? `Add import '${info.import}' from module '${info.module}'` : fixe.description;
         }
       }
     }
@@ -242,48 +262,65 @@ export class TsLanguageServiceHost {
     const start = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(range.start));
     const end = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(range.end));
     const fixes = this.tsService.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {});
-    const actions: CodeAction[] = fixes.map((fix) => {
-      if (fix.fixName == "import") {
-        this.normalizeImportToTemplate(virtualFile, fix);
-      } else {
-        for (const change of fix.changes) {
-          for (const textChange of change.textChanges) {
-            textChange.span.start = this.normalizeVirtualFileToTemplatePosition(virtualFile, textChange.span.start);
+    const actions: CodeAction[] = fixes
+      .filter((fix) => {
+        if (fix.fixName == "import") {
+          for (const change of fix.changes) {
+            for (const textChange of change.textChanges) {
+              if (textChange.newText.includes(`from '`)) {
+                const importMatch = textChange.newText.match(/from ['"](.*)['"]/);
+                if (importMatch && importMatch[1].endsWith(`.${EXTENSION_VIRTUAL}`)) {
+                  return false;
+                }
+              }
+            }
           }
         }
-      }
-
-      const range: Range = fix.changes[0]?.textChanges[0]
-        ? {
-            start: document.positionAt(fix.changes[0].textChanges[0].span.start),
-            end: document.positionAt(fix.changes[0].textChanges[0].span.start),
+        return true;
+      })
+      .map((fix) => {
+        if (fix.fixName == "import") {
+          this.normalizeImportToTemplate(virtualFile, fix);
+        } else {
+          for (const change of fix.changes) {
+            for (const textChange of change.textChanges) {
+              textChange.span.start = this.normalizeVirtualFileToTemplatePosition(virtualFile, textChange.span.start);
+            }
           }
-        : {
-            start: { line: 0, character: 0 },
-            end: { line: 0, character: 0 },
-          };
+        }
 
-      return {
-        title: fix.description,
-        kind: CodeActionKind.QuickFix,
-        edit: {
-          changes: {
-            [document.uri]: fix.changes.flatMap((c) =>
-              c.textChanges.map((tc) => ({
-                range: range!,
-                newText: tc.newText,
-              }))
-            ),
+        const range: Range = fix.changes[0]?.textChanges[0]
+          ? {
+              start: document.positionAt(fix.changes[0].textChanges[0].span.start),
+              end: document.positionAt(fix.changes[0].textChanges[0].span.start),
+            }
+          : {
+              start: { line: 0, character: 0 },
+              end: { line: 0, character: 0 },
+            };
+
+        return {
+          title: fix.description,
+          kind: CodeActionKind.QuickFix,
+          edit: {
+            changes: {
+              [document.uri]: fix.changes.flatMap((c) =>
+                c.textChanges.map((tc) => ({
+                  range: range!,
+                  newText: tc.newText,
+                }))
+              ),
+            },
           },
-        },
-      };
-    });
+        };
+      });
     return actions;
   }
 
   deleteVirtualFile(uri: string) {
     const fileName = normalizeFileName(uri);
     this.files.delete(fileName);
+    this.parsedConfig.fileNames = this.parsedConfig.fileNames.filter((e) => e !== fileName);
   }
 
   updateVirtualFile(document: TextDocument): Diagnostic[] {
@@ -308,9 +345,29 @@ export class TsLanguageServiceHost {
     };
     virtualFile.version++;
     virtualFile.content = templateSource;
-    Transforme.analisar(virtualFile, templateSource);
-    this.files.set(fileName, virtualFile);
-    const diagnostics = this.getDiagnosticsTemplate(document);
+    if (!Transforme.analisar(virtualFile)) {
+      const lines = templateSource.split("\n");
+      const start = { line: 0, character: 0 };
+      const end = { line: lines.length - 1, character: lines[lines.length - 1]?.length || 0 };
+      this.files.delete(fileName);
+      this.parsedConfig.fileNames = this.parsedConfig.fileNames.filter((e) => e !== fileName);
+      return [
+        {
+          severity: 1,
+          range: {
+            start,
+            end,
+          },
+          code: 9999,
+          message: `No corresponding .ts or .tsx file found for this .template file. Please create a '${className}.ts' or '${className}.tsx' file in the same folder.`,
+          source: "TypeComposer",
+        },
+      ];
+    }
+    if (!this.files.has(fileName)) {
+      this.parsedConfig.fileNames.push(fileName);
+      this.files.set(fileName, virtualFile);
+    }
     if (!virtualFile.isJsxOnly) {
       const lines = templateSource.split("\n");
       const start = { line: 0, character: 0 };
@@ -324,11 +381,13 @@ export class TsLanguageServiceHost {
           },
           code: 9999,
 
-          message: `The file contains non-JSX/TSX code after imports. Only JSX/TSX code is allowed in .template files. Example: wrap multiple root elements or siblings in a fragment like <>...</> (e.g. <>\n  <div/>\n  <div/>\n</>).`,
+          message:
+            virtualFile.message ||
+            `The file contains non-JSX/TSX code after imports. Only JSX/TSX code is allowed in .template files. Example: wrap multiple root elements or siblings in a fragment like <>...</> (e.g. <>\n  <div/>\n  <div/>\n</>).`,
           source: "TypeComposer",
         },
       ];
     }
-    return diagnostics;
+    return this.getDiagnosticsTemplate(document);
   }
 }

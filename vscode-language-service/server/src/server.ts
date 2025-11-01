@@ -2,6 +2,7 @@ import { CodeAction, CodeActionKind, CompletionItem, CompletionItemKind, createC
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { TsLanguageServiceHost } from "./tsService";
 import { TAGS_HTML } from "./utils";
+import { fileURLToPath } from "url";
 
 const connection = createConnection(ProposedFeatures.all);
 export const documents = new TextDocuments(TextDocument);
@@ -9,9 +10,13 @@ export const isDebug = process.execArgv.some((arg) => arg.includes("--inspect"))
 let tsService!: TsLanguageServiceHost;
 
 connection.onInitialize((params) => {
-  console.log(isDebug ? "Language Server running in DEBUG mode" : "Language Server running in NORMAL mode");
+  connection.console.log(isDebug ? "Language Server running in DEBUG mode" : "Language Server running in NORMAL mode");
+
   const workspaceFolder = params.workspaceFolders?.[0];
-  const workspacePath: string = workspaceFolder ? new URL(workspaceFolder.uri).pathname : new URL(params?.rootUri || "").pathname;
+  const workspacePath = workspaceFolder ? fileURLToPath(workspaceFolder.uri) : params.rootUri ? fileURLToPath(params.rootUri) : process.cwd();
+  connection.console.log(`Workspace folder resolved to: ${workspaceFolder?.uri}`);
+  // connection.console.log(`params: ` + JSON.stringify(params, null, 2));
+  connection.console.log(`Workspace path resolved to: ${workspacePath}`);
   tsService = new TsLanguageServiceHost(workspacePath);
   return {
     capabilities: {

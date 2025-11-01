@@ -7,7 +7,7 @@
       "request": "launch",
       "name": "Launch Client",
       "runtimeExecutable": "${execPath}",
-      "args": ["--extensionDevelopmentPath=${workspaceRoot}", "--disable-extensions", "--enable-proposed-api", "vscode.typescript-language-features"],
+      "args": ["--extensionDevelopmentPath=${workspaceRoot}"],
       "env": { "EXT_MODE": "debug" },
       "outFiles": ["${workspaceRoot}/client/out/**/*.js", "${workspaceRoot}/server/out/**/*.js"],
       "autoAttachChildProcesses": true,

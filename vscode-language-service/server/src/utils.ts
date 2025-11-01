@@ -65,6 +65,7 @@ export interface VirtualFile {
   version: number;
   isJsxOnly: boolean;
   folder: string;
+  message?: string;
 }
 
 export class IRange {

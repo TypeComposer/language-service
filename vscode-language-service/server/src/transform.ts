@@ -135,7 +135,7 @@ ${codeWithoutImports}
     fs.writeFileSync(`${virtualFile.tsUrl}.jsx`, virtualFile.virtualContent, "utf8");
   }
 
-  export function analisar(virtualFile: VirtualFile, templateSource: string): boolean {
+  export function analisar(virtualFile: VirtualFile): boolean {
     try {
       if (virtualFile.tsUrl && fs.existsSync(virtualFile.tsUrl)) {
         const modifiedTime = fs.statSync(virtualFile.tsUrl).mtimeMs;
@@ -164,20 +164,6 @@ ${codeWithoutImports}
     }
     return false;
   }
-
-  // export function margeImport(importTemplate: string, importFix: string): string {
-  //   const importLines = importTemplate
-  //     .split("\n")
-  //     .map((l) => l.trim())
-  //     .filter((l) => l.startsWith("import "));
-  //   const fixLines = importFix
-  //     .split("\n")
-  //     .map((l) => l.trim())
-  //     .filter((l) => l.startsWith("import "));
-
-  //   const allImports = Array.from(new Set([...importLines, ...fixLines]));
-  //   return allImports.join("\n") + "\n";
-  // }
 
   function infoImports(code: string): ImportInfo[] {
     const regex = /import\s+(?:\{([^}]+)\}|\*\s+as\s+([^\s]+)|([^\s'"]+))?\s*(?:from\s+)?['"]([^'"]+)['"]\s*;?/g;
@@ -256,8 +242,3 @@ ${codeWithoutImports}
     };
   }
 }
-
-// 59
-// import { HomePage } from "@/pages/Home";
-// import { H1Element, H2Element } from "typecomposer";
-// import { TestTsx } from "@/router/tes";
