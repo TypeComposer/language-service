@@ -320,11 +320,20 @@ export class TsLanguageServiceHost {
   deleteVirtualFile(uri: string) {
     const fileName = normalizeFileName(uri);
     this.files.delete(fileName);
-    this.parsedConfig.fileNames = this.parsedConfig.fileNames.filter((e) => e !== fileName);
+    this.updateParsedConfigFileNames();
+  }
+
+  updateParsedConfigFileNames() {
+    const files = this.files.keys();
+    const rootFiles = new Set<string>(this.parsedConfig.fileNames);
+    for (const file of files) {
+      rootFiles.add(file);
+    }
+    this.parsedConfig.fileNames = Array.from(rootFiles);
   }
 
   updateVirtualFile(document: TextDocument): Diagnostic[] {
-    this.tsService.cleanupSemanticCache();
+    // this.tsService.cleanupSemanticCache();
     const fileName = normalizeFileName(document.uri);
     const templateSource = document.getText();
     const className = path.basename(document.uri, ".template");
@@ -350,7 +359,7 @@ export class TsLanguageServiceHost {
       const start = { line: 0, character: 0 };
       const end = { line: lines.length - 1, character: lines[lines.length - 1]?.length || 0 };
       this.files.delete(fileName);
-      this.parsedConfig.fileNames = this.parsedConfig.fileNames.filter((e) => e !== fileName);
+      this.updateParsedConfigFileNames();
       return [
         {
           severity: 1,
@@ -364,10 +373,8 @@ export class TsLanguageServiceHost {
         },
       ];
     }
-    if (!this.files.has(fileName)) {
-      this.parsedConfig.fileNames.push(fileName);
-      this.files.set(fileName, virtualFile);
-    }
+    this.files.set(fileName, virtualFile);
+    this.updateParsedConfigFileNames();
     if (!virtualFile.isJsxOnly) {
       const lines = templateSource.split("\n");
       const start = { line: 0, character: 0 };
