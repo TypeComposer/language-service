@@ -6,6 +6,9 @@ import * as fs from "fs";
 import path = require("path");
 import { isDebug } from "./server";
 
+const folderCache = new Map<string, { mtime: number; files: string[] }>();
+const sourceCache = new Map<string, { mtime: number; code: string }>();
+
 interface ImportInfo {
   module: string;
   text: string;
@@ -22,6 +25,41 @@ export interface TemplateImport {
 }
 export namespace Transforme {
   export const EXTENSION_VIRTUAL = "tc.template.virtual.tsx";
+
+  function listCandidateSourceFiles(folder: string): string[] {
+    try {
+      const stat = fs.statSync(folder);
+      const cached = folderCache.get(folder);
+      if (cached && cached.mtime === stat.mtimeMs) {
+        return cached.files;
+      }
+      const files = fs
+        .readdirSync(folder)
+        .filter((file) => !file.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`) && (file.endsWith(".tsx") || file.endsWith(".ts")))
+        .map((file) => path.join(folder, file));
+      folderCache.set(folder, { mtime: stat.mtimeMs, files });
+      return files;
+    } catch (err) {
+      folderCache.delete(folder);
+      return [];
+    }
+  }
+
+  function readSourceCached(filePath: string): string | null {
+    try {
+      const stat = fs.statSync(filePath);
+      const cached = sourceCache.get(filePath);
+      if (cached && cached.mtime === stat.mtimeMs) {
+        return cached.code;
+      }
+      const code = fs.readFileSync(filePath, "utf-8");
+      sourceCache.set(filePath, { mtime: stat.mtimeMs, code });
+      return code;
+    } catch (err) {
+      sourceCache.delete(filePath);
+      return null;
+    }
+  }
 
   function buildTemplateReturn() {
     return t.returnStatement(t.parenthesizedExpression(t.jsxFragment(t.jsxOpeningFragment(), t.jsxClosingFragment(), [t.jsxText("/*__TC_START__*/"), t.jsxText("/*__TC_END__*/")])));
@@ -139,24 +177,25 @@ ${codeWithoutImports}
     try {
       if (virtualFile.tsUrl && fs.existsSync(virtualFile.tsUrl)) {
         const modifiedTime = fs.statSync(virtualFile.tsUrl).mtimeMs;
-        if (virtualFile.tsModified === modifiedTime) {
+        if (virtualFile.tsModified === modifiedTime && virtualFile.tsContent) {
           return analisarCode(virtualFile, virtualFile.tsContent);
         }
-        const code = fs.readFileSync(virtualFile.tsUrl, "utf-8");
-        return analisarCode(virtualFile, code);
-      } else virtualFile.tsUrl = "";
-      const files = fs.readdirSync(virtualFile.folder);
-      for (const file of files) {
-        if (!file.endsWith(`.${Transforme.EXTENSION_VIRTUAL}`) && (file.endsWith(".tsx") || file.endsWith(".ts"))) {
-          const filePath = path.join(virtualFile.folder, file);
-          const code = fs.readFileSync(filePath, "utf-8");
-
-          const isValid = analisarCode(virtualFile, code);
-          if (isValid) {
-            virtualFile.tsUrl = filePath;
-            if (isDebug) debugFile(virtualFile);
-            return true;
-          }
+        const cached = readSourceCached(virtualFile.tsUrl);
+        if (cached) {
+          return analisarCode(virtualFile, cached);
+        }
+      } else {
+        virtualFile.tsUrl = "";
+      }
+      const candidates = listCandidateSourceFiles(virtualFile.folder);
+      for (const filePath of candidates) {
+        const code = readSourceCached(filePath);
+        if (!code) continue;
+        const isValid = analisarCode(virtualFile, code);
+        if (isValid) {
+          virtualFile.tsUrl = filePath;
+          if (isDebug) debugFile(virtualFile);
+          return true;
         }
       }
     } catch (err) {

@@ -2,10 +2,33 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from "vscode-languageclient/node";
 
-export function activate(context: vscode.ExtensionContext) {
+
+async function workspaceHasActivationFlag(): Promise<boolean> {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) return false;
+
+  for (const folder of folders) {
+    const tsconfigUri = vscode.Uri.joinPath(folder.uri, "tsconfig.json");
+    try {
+      const bytes = await vscode.workspace.fs.readFile(tsconfigUri);
+      const content = Buffer.from(bytes).toString("utf8");
+      const re = /["']?\btypecomposer\b["']?\s*:\s*true\s*,?/i;
+      return re.test(content);
+    } catch (_) {
+    }
+  }
+  return false;
+}
+
+export async function activate(context: vscode.ExtensionContext) {
+  const enabled = await workspaceHasActivationFlag();
+  if (!enabled) {
+    console.log('TypeComposer: activation flag not found in any tsconfig.json — extension disabled.');
+    return;
+  }
   const LANGUAGE_ID = "tsx-template";
   const serverModule = context.asAbsolutePath(path.join("server", "out", "server.js"));
-  const outputChannel = vscode.window.createOutputChannel("My Language Server");
+  const outputChannel = vscode.window.createOutputChannel("Typecomposer Language Server");
   outputChannel.show(true);
 
   const serverOptions: ServerOptions = {

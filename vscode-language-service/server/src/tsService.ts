@@ -24,6 +24,7 @@ export class TsLanguageServiceHost {
   parsedConfig: ts.ParsedCommandLine;
   host: ts.LanguageServiceHost;
   tsService!: ts.LanguageService;
+  private isRunning = true;
   private files = new Map<string, VirtualFile>();
   private workspaceRoot: string;
 
@@ -47,8 +48,9 @@ export class TsLanguageServiceHost {
     parsed.options.baseUrl = configDir;
     parsed.options.pathsBasePath = parsed.options.baseUrl;
     this.workspaceRoot = configDir;
-    // console.log(`Loaded tsconfig from ${configPath}`);
-    // console.log(`Compiler options:`, parsed.options);
+    // @ts-ignore
+    this.isRunning = parsed.raw?.typecomposer === true;
+    console.log("TsLanguageServiceHost isRunning:", this.isRunning);
     return parsed;
   }
 
@@ -65,7 +67,6 @@ export class TsLanguageServiceHost {
       rootFileNames.add(file);
     }
     this.parsedConfig.fileNames = Array.from(rootFileNames);
-    // console.log(`Root file names:`, this.parsedConfig.fileNames);
   }
 
   createHost(): ts.LanguageServiceHost {
@@ -100,7 +101,7 @@ export class TsLanguageServiceHost {
   getCompletionsTemplateAtPosition(document: TextDocument, position: Position, options: ts.GetCompletionsAtPositionOptions) {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
-    if (!virtualFile || !virtualFile.isJsxOnly) return [];
+    if (!this.isRunning || !virtualFile || !virtualFile.isJsxOnly) return [];
     const offset = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(position));
     const tsOptions: ts.GetCompletionsAtPositionOptions = {
       includeExternalModuleExports: true,
@@ -147,7 +148,7 @@ export class TsLanguageServiceHost {
   getHoverTemplateAtPosition(document: TextDocument, position: Position) {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
-    if (!virtualFile || !virtualFile.isJsxOnly) return null;
+    if (!this.isRunning || !virtualFile || !virtualFile.isJsxOnly) return null;
     const info = this.tsService.getQuickInfoAtPosition(fileName, this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(position)));
     if (!info) return null;
     const display = ts.displayPartsToString(info.displayParts);
@@ -175,7 +176,7 @@ export class TsLanguageServiceHost {
   getDefinitionTemplateAtPosition(document: TextDocument, position: Position) {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
-    if (!virtualFile || !virtualFile.isJsxOnly) return null;
+    if (!this.isRunning || !virtualFile || !virtualFile.isJsxOnly) return null;
     const offset = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(position));
     const defs = this.tsService.getDefinitionAtPosition(fileName, offset) as ts.DefinitionInfo[];
 
@@ -202,7 +203,7 @@ export class TsLanguageServiceHost {
   getDiagnosticsTemplate(document: TextDocument): Diagnostic[] {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
-    if (!virtualFile || !virtualFile.isJsxOnly) return [];
+    if (!this.isRunning || !virtualFile || !virtualFile.isJsxOnly) return [];
     const diagnostics = this.tsService.getSemanticDiagnostics(fileName).concat(this.tsService.getSyntacticDiagnostics(fileName));
     return diagnostics
       .filter((diag) => {
@@ -258,7 +259,7 @@ export class TsLanguageServiceHost {
   getCodeFixesTemplateAtPosition(document: TextDocument, range: Range, errorCodes: readonly number[]): CodeAction[] {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
-    if (!virtualFile || !virtualFile.isJsxOnly) return [];
+    if (!this.isRunning || !virtualFile || !virtualFile.isJsxOnly) return [];
     const start = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(range.start));
     const end = this.normalizeTemplateToVirtualFilePosition(virtualFile, document.offsetAt(range.end));
     const fixes = this.tsService.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {});
@@ -333,7 +334,9 @@ export class TsLanguageServiceHost {
   }
 
   updateVirtualFile(document: TextDocument): Diagnostic[] {
-    // this.tsService.cleanupSemanticCache();
+    if (!this.isRunning) {
+      return [];
+    }
     const fileName = normalizeFileName(document.uri);
     const templateSource = document.getText();
     const className = path.basename(document.uri, ".template");
