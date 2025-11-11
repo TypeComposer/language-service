@@ -1,7 +1,8 @@
 import * as path from "path";
 import * as vscode from "vscode";
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from "vscode-languageclient/node";
-
+ 
+const isDebug = process.execArgv.some((arg) => arg.includes("--inspect"));
 
 async function workspaceHasActivationFlag(): Promise<boolean> {
   const folders = vscode.workspace.workspaceFolders;
@@ -29,7 +30,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const LANGUAGE_ID = "tsx-template";
   const serverModule = context.asAbsolutePath(path.join("server", "out", "server.js"));
   const outputChannel = vscode.window.createOutputChannel("Typecomposer Language Server");
-  outputChannel.show(true);
+  if (isDebug) outputChannel.show(true);
 
   const serverOptions: ServerOptions = {
     run: { module: serverModule, transport: TransportKind.ipc },
