@@ -160,9 +160,9 @@ export class TsLanguageServiceHost {
       contents: contents,
       range: info.textSpan
         ? {
-            start: document.positionAt(start),
-            end: document.positionAt(start + info.textSpan.length),
-          }
+          start: document.positionAt(start),
+          end: document.positionAt(start + info.textSpan.length),
+        }
         : undefined,
     };
   }
@@ -204,9 +204,10 @@ export class TsLanguageServiceHost {
     const fileName = normalizeFileName(document.uri);
     const virtualFile = this.files.get(fileName);
     if (!this.isRunning || !virtualFile || !virtualFile.isJsxOnly) return [];
-    const diagnostics = this.tsService.getSemanticDiagnostics(fileName).concat(this.tsService.getSyntacticDiagnostics(fileName));
-    return diagnostics
+    const diagnostics = this.tsService.getSemanticDiagnostics(fileName).concat(this.tsService.getSyntacticDiagnostics(fileName))
       .filter((diag) => {
+        if (diag.code === 2322 && ts.flattenDiagnosticMessageText(diag.messageText, "\n").includes("Property 'key' does not exist on type"))
+          return false;
         const start = diag.start ?? 0;
         return virtualFile.bodyRange.isInsideVirtual(start) || virtualFile.importRange.isInsideVirtual(start);
       })
@@ -226,6 +227,8 @@ export class TsLanguageServiceHost {
           source: "TypeComposer",
         };
       });
+    // @ts-ignore
+    return diagnostics;
   }
 
   normalizeImportToTemplate(virtualFile: VirtualFile, fixe: ts.CodeFixAction): ts.CodeFixAction {
@@ -292,13 +295,13 @@ export class TsLanguageServiceHost {
 
         const range: Range = fix.changes[0]?.textChanges[0]
           ? {
-              start: document.positionAt(fix.changes[0].textChanges[0].span.start),
-              end: document.positionAt(fix.changes[0].textChanges[0].span.start),
-            }
+            start: document.positionAt(fix.changes[0].textChanges[0].span.start),
+            end: document.positionAt(fix.changes[0].textChanges[0].span.start),
+          }
           : {
-              start: { line: 0, character: 0 },
-              end: { line: 0, character: 0 },
-            };
+            start: { line: 0, character: 0 },
+            end: { line: 0, character: 0 },
+          };
 
         return {
           title: fix.description,
