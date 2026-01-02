@@ -1,8 +1,10 @@
 import * as path from "path";
 import * as vscode from "vscode";
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from "vscode-languageclient/node";
- 
+import { formatTemplate } from './formatTemplate';
+
 const isDebug = process.execArgv.some((arg) => arg.includes("--inspect"));
+const LANGUAGE_ID = "tsx-template";
 
 async function workspaceHasActivationFlag(): Promise<boolean> {
   const folders = vscode.workspace.workspaceFolders;
@@ -21,17 +23,48 @@ async function workspaceHasActivationFlag(): Promise<boolean> {
   return false;
 }
 
+function registerTemplateFormatter(context: vscode.ExtensionContext) {
+  const provider: vscode.DocumentFormattingEditProvider = {
+    async provideDocumentFormattingEdits(document) {
+      return [
+        vscode.TextEdit.replace(
+          new vscode.Range(0, 0, document.lineCount, 0),
+          await formatTemplate(document.getText())
+        )
+      ];
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.languages.registerDocumentFormattingEditProvider(
+      "tsx-template",
+      provider
+    )
+  );
+}
+
+function setDefaultFormatter(context: vscode.ExtensionContext) {
+  const config = vscode.workspace.getConfiguration();
+  const globalDefault = config.get("editor.defaultFormatter");
+  console.log("Global default formatter:", config.get(`[${LANGUAGE_ID}]`));
+  // @ts-ignore
+  const templateDefault = config.get(`[${LANGUAGE_ID}]`)?.["editor.defaultFormatter"];
+  if (!templateDefault) {
+    registerTemplateFormatter(context);
+  }
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   const enabled = await workspaceHasActivationFlag();
   if (!enabled) {
     console.log('TypeComposer: activation flag not found in any tsconfig.json — extension disabled.');
     return;
   }
-  const LANGUAGE_ID = "tsx-template";
   const serverModule = context.asAbsolutePath(path.join("server", "out", "server.js"));
   const outputChannel = vscode.window.createOutputChannel("Typecomposer Language Server");
   if (isDebug) outputChannel.show(true);
 
+  setDefaultFormatter(context);
   const serverOptions: ServerOptions = {
     run: { module: serverModule, transport: TransportKind.ipc },
     debug: { module: serverModule, transport: TransportKind.ipc, options: { execArgv: ["--nolazy", "--inspect=6009"] } },
@@ -90,4 +123,4 @@ async function registerWithTypeScript(languageId: string, configurationPath: str
   }
 }
 
-export function deactivate() {}
+export function deactivate() { }
